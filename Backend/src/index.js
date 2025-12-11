@@ -16,11 +16,6 @@ app.use(
   })
 );
 
-app.options("*", cors({
-  origin: "https://donate-v2-jgkc.onrender.com",
-  credentials: true,
-}));
-
 
 
 app.use(express.json());
