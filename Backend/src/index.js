@@ -9,13 +9,18 @@ import profileRouter from "./routes/profile.routes.js";
 import donationRouter from "./routes/donations.js";
 const app = express();
 
-
 app.use(
   cors({
-    origin: process.env.FRONTEND_ORIGIN, // your React frontend URL
-    credentials: true, // allow cookies
+    origin: "https://donate-v2-jgkc.onrender.com",
+    credentials: true,
   })
 );
+
+app.options("*", cors({
+  origin: "https://donate-v2-jgkc.onrender.com",
+  credentials: true,
+}));
+
 
 
 app.use(express.json());
