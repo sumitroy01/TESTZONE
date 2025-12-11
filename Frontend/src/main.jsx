@@ -6,6 +6,11 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import "./index.css";
 import { Toaster } from "react-hot-toast";
+import { initSocket } from "./lib/socket.js";
+
+if (typeof window !== "undefined") {
+  initSocket();
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

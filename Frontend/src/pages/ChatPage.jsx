@@ -10,9 +10,7 @@ import ChatWindow from "../components/chat/ChatWindow.jsx";
 import CreateGroupModal from "../components/chat/CreateGroupModal.jsx";
 import EditGroupModal from "../components/chat/EditGroupModal.jsx";
 
-// Try to import socket instance (if you have one)
-// If you don't have ../lib/socket, ensure you expose socket to window.__socket in your client init
-import socketFromLib from "../lib/socket"; // if this file doesn't exist, build will fail — see fallback below
+import { getSocket } from "../lib/socket.js";
 
 function ChatPage() {
   const { authUser } = authStore();
@@ -35,7 +33,6 @@ function ChatPage() {
     isUpdatingGroup,
     deleteChat,
     isDeletingChat,
-    // NEW: didLoadChats flag from store
     didLoadChats,
   } = chatstore();
 
@@ -56,33 +53,41 @@ function ChatPage() {
   const [groupName, setGroupName] = useState("");
   const [searchUserName, setSearchUserName] = useState("");
   const [selectedUsers, setSelectedUsers] = useState([]);
-
   const [isEditingGroup, setIsEditingGroup] = useState(false);
-
-  // mobile: true = show sidebar, false = show chat window
   const [showSidebarOnMobile, setShowSidebarOnMobile] = useState(true);
 
   const activeMessagesEntry = selectedChat
     ? messagesByChat[selectedChat._id]
     : null;
+
   const messages = activeMessagesEntry?.data || [];
 
-  // INITIAL LOAD: only attempt once (use didLoadChats to avoid loop when server returns data:[])
+  // --------------------------
+  // Initial fetch of chats
+  // --------------------------
   useEffect(() => {
     if (!chats.length && !isFetchingChats && !didLoadChats) {
       fetchChats(1, limit);
     }
   }, [chats.length, isFetchingChats, didLoadChats, fetchChats, limit]);
 
+  // --------------------------
+  // Fetch messages when chat changes
+  // --------------------------
   useEffect(() => {
     if (selectedChat && !messagesByChat[selectedChat._id]) {
       fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
+
       if (authUser?._id) {
-        markAsRead({ chatId: selectedChat._id, userId: authUser._id });
+        markAsRead({
+          chatId: selectedChat._id,
+          userId: authUser._id,
+        });
       }
     }
   }, [selectedChat, messagesByChat, fetchMessages, markAsRead, authUser]);
 
+  // sort chats by latest message
   const sortedChats = useMemo(() => {
     return [...chats].sort((a, b) => {
       const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
@@ -91,9 +96,12 @@ function ChatPage() {
     });
   }, [chats]);
 
+  // --------------------------
+  // Selecting a chat
+  // --------------------------
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
-    setShowSidebarOnMobile(false); // go to messages on mobile
+    setShowSidebarOnMobile(false);
   };
 
   const handleLoadMoreChats = () => {
@@ -102,56 +110,55 @@ function ChatPage() {
     }
   };
 
-  // optimistic send: create a temp local message before calling sendMessage
+  // --------------------------
+  // Sending a message (optimistic)
+  // --------------------------
   const handleSendMessage = async (payload) => {
-    // validate content
     if (payload?.content && typeof payload.content === "string") {
       if (!payload.content.trim()) return;
     }
 
-    // Determine chatId for optimistic message
     const isFormData = payload instanceof FormData;
     const chatId = isFormData ? payload.get("chatId") : payload?.chatId;
+
     if (!chatId) {
-      // nothing we can do
-      await messageStore.getState().sendMessage(payload);
+      await sendMessage(payload);
       return;
     }
 
-    // Create temp id and temp message for optimistic UI
     const tempId = `temp-${Date.now()}`;
-
-    // Build a lightweight temp message shape compatible with your store and UI
     const tempMessage = {
       _id: tempId,
       clientTempId: tempId,
       chat: { _id: chatId },
       chatId,
-      content: payload?.content ?? (isFormData ? payload.get("content") : ""),
+      content:
+        payload?.content ??
+        (isFormData ? payload.get("content") : ""),
       sender: authUser || { _id: authUser?._id },
-      messageType: payload?.messageType || (isFormData ? payload.get("messageType") : "text"),
+      messageType:
+        payload?.messageType ||
+        (isFormData ? payload.get("messageType") : "text"),
       createdAt: new Date().toISOString(),
       readBy: [authUser?._id],
     };
 
-    // Add clientTempId to payload if it's JSON so server can echo it back (optional)
-    if (!isFormData && payload && typeof payload === "object") {
+    if (!isFormData) {
       payload.clientTempId = tempId;
-    } else if (isFormData) {
+    } else {
       try {
         payload.append("clientTempId", tempId);
-      } catch (e) {
-        // some FormData wrappers might be immutable; ignore
-      }
+      } catch {}
     }
 
-    // Push local optimistic message
     messageStore.getState().addLocalMessage(tempMessage);
 
-    // Now send to server (server response will be appended/reconciled by message.store)
-    await messageStore.getState().sendMessage(payload);
+    await sendMessage(payload);
   };
 
+  // --------------------------
+  // Group handling
+  // --------------------------
   const toggleUserInGroup = (user) => {
     const exists = selectedUsers.find((u) => u._id === user._id);
     if (exists) {
@@ -163,8 +170,14 @@ function ChatPage() {
 
   const handleCreateGroup = async ({ groupAvatar }) => {
     if (!groupName.trim() || selectedUsers.length === 0) return;
+
     const users = selectedUsers.map((u) => u._id);
-    await createGroupChat({ name: groupName.trim(), users, groupAvatar });
+
+    await createGroupChat({
+      name: groupName.trim(),
+      users,
+      groupAvatar,
+    });
 
     setIsCreatingGroup(false);
     setGroupName("");
@@ -177,8 +190,7 @@ function ChatPage() {
 
     const existing = chats.find((chat) => {
       if (chat.isGroupChat || chat.isGroup) return false;
-      const other = (chat.users || []).find((u) => u._id === user._id);
-      return !!other;
+      return chat.users?.some((u) => u._id === user._id);
     });
 
     if (existing) {
@@ -187,17 +199,13 @@ function ChatPage() {
     } else if (accessChat) {
       accessChat(user._id);
       setShowSidebarOnMobile(false);
-    } else {
-      setSelectedChat(null);
     }
   };
 
   const handleOpenEditGroup = (chat) => {
     const target = chat || selectedChat;
     if (!target) return;
-
-    const isGroup = target.isGroupChat || target.isGroup;
-    if (!isGroup) return;
+    if (!(target.isGroupChat || target.isGroup)) return;
 
     setSelectedChat(target);
     setIsEditingGroup(true);
@@ -216,83 +224,61 @@ function ChatPage() {
     }
   };
 
-  // -------------------------
-  // Socket wiring effect
-  // -------------------------
+  // --------------------------
+  // FINAL FIXED SOCKET LOGIC
+  // --------------------------
   const didSetupSocketRef = useRef(false);
 
   useEffect(() => {
-    // choose a socket reference: prefer lib import, fallback to window.__socket
-    const socket = (typeof socketFromLib !== "undefined" && socketFromLib) || (typeof window !== "undefined" && window.__socket);
+    // Ensure this effect runs ONLY once (even in Strict Mode)
+    if (didSetupSocketRef.current) return;
 
-    if (!socket) {
-      // graceful: no socket available — skip
-      // console.warn("socket not found: real-time disabled");
+    let socket = getSocket();
+    if (!socket && typeof window !== "undefined") {
+      socket = window.__socket;
+    }
+
+    if (!socket || typeof socket.on !== "function") {
+      console.warn("No valid socket instance found.");
       return;
     }
 
-    // guard to avoid double-subscribe (React strict mode)
-    if (didSetupSocketRef.current) return;
     didSetupSocketRef.current = true;
+    console.log("📡 Socket listeners attached once");
 
     const onNewMessage = (payload) => {
       try {
-        // payload is expected to be the message object with message.chat or message.chat._id
         messageStore.getState().pushIncomingMessage(payload);
         chatstore.getState().handleIncomingMessage(payload);
-      } catch (err) {
-        console.warn("onNewMessage handler error:", err);
-      }
+      } catch {}
     };
 
     const onChatCreated = (payload) => {
-      try {
-        chatstore.getState().handleChatCreated(payload);
-      } catch (err) {
-        console.warn("onChatCreated handler error:", err);
-      }
+      chatstore.getState().handleChatCreated(payload);
     };
 
     const onChatUpdated = (payload) => {
-      try {
-        chatstore.getState().handleChatUpdated(payload);
-      } catch (err) {
-        console.warn("onChatUpdated handler error:", err);
-      }
+      chatstore.getState().handleChatUpdated(payload);
     };
 
     const onChatDeleted = (payload) => {
-      try {
-        // payload might be { chatId } or chatId string
-        const chatId = payload && (payload.chatId || payload);
-        if (chatId) chatstore.getState().handleChatDeleted(chatId);
-      } catch (err) {
-        console.warn("onChatDeleted handler error:", err);
-      }
+      const chatId = payload?.chatId || payload;
+      chatstore.getState().handleChatDeleted(chatId);
     };
 
     const onAddedToGroup = (payload) => {
-      try {
-        // treat as chatUpdated (frontend will insert/move to top)
-        chatstore.getState().handleChatUpdated(payload);
-      } catch (err) {
-        console.warn("onAddedToGroup handler error:", err);
-      }
+      chatstore.getState().handleChatUpdated(payload);
     };
 
     const onRemovedFromGroup = (payload) => {
-      try {
-        // payload could be { chatId, removedUserId } or populated chat
-        if (payload && (payload.chatId || payload._id)) {
-          const chatId = payload.chatId || payload._id;
-          chatstore.getState().handleChatUpdated(payload);
-          // if the current user was removed, server might also send chatDeleted; check
-          if (payload.removedUserId && String(payload.removedUserId) === String(authUser?._id)) {
-            chatstore.getState().handleChatDeleted(chatId);
-          }
-        }
-      } catch (err) {
-        console.warn("onRemovedFromGroup handler error:", err);
+      const chatId = payload?.chatId || payload?._id;
+      chatstore.getState().handleChatUpdated(payload);
+
+      if (
+        payload?.removedUserId &&
+        String(payload.removedUserId) === String(authUser?._id)
+      ) {
+        chatstore.getState().handleChatDeleted(chatId);
       }
     };
 
@@ -303,30 +289,20 @@ function ChatPage() {
     socket.on("addedToGroup", onAddedToGroup);
     socket.on("removedFromGroup", onRemovedFromGroup);
 
-    return () => {
-      try {
-        socket.off("newMessage", onNewMessage);
-        socket.off("chatCreated", onChatCreated);
-        socket.off("chatUpdated", onChatUpdated);
-        socket.off("chatDeleted", onChatDeleted);
-        socket.off("addedToGroup", onAddedToGroup);
-        socket.off("removedFromGroup", onRemovedFromGroup);
-      } catch (e) {
-        // ignore
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser]); // keep authUser so removedFromGroup check can compare ids
+  }, []); // <-- EMPTY DEPS = runs only once ALWAYS
 
+  // --------------------------
+  // UI
+  // --------------------------
   return (
     <div className="h-[calc(100vh-5rem)] w-full max-w-6xl mx-auto rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden flex flex-col shadow-2xl shadow-black/40">
+
       {/* Mobile top bar */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 md:hidden">
         <button
           onClick={() => setShowSidebarOnMobile((prev) => !prev)}
           className="p-2 rounded-xl hover:bg-white/10 active:scale-95 transition"
         >
-          <span className="sr-only">Toggle chat list</span>
           <div className="space-y-1">
             <span className="block w-5 h-0.5 bg-white" />
             <span className="block w-5 h-0.5 bg-white" />
@@ -345,8 +321,8 @@ function ChatPage() {
         <div className="w-8" />
       </div>
 
-      {/* Content */}
       <div className="flex-1 flex overflow-hidden">
+
         {/* Sidebar */}
         <div
           className={`${
@@ -391,6 +367,7 @@ function ChatPage() {
             isDeletingChat={isDeletingChat}
           />
         </div>
+
       </div>
 
       {isCreatingGroup && (
@@ -426,6 +403,7 @@ function ChatPage() {
           isUpdatingGroup={isUpdatingGroup}
         />
       )}
+
     </div>
   );
 }

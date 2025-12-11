@@ -13,6 +13,9 @@ import ChatPage from "./pages/ChatPage";
 import AuthPage from "./pages/AuthPage.jsx";
 import ProfileSettings from "./pages/ProfileSettings.jsx";
 
+// socket helpers (cookie-based auth -> no token needed)
+import { initSocket, disconnectSocket } from "./lib/socket";
+
 function FullScreenLoader() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
@@ -45,7 +48,7 @@ function FullScreenLoader() {
 }
 
 function App() {
-  const { authUser, isCheckingAuth, checkAuth,logOut } = authStore();
+  const { authUser, isCheckingAuth, checkAuth, logOut } = authStore();
 
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState("login"); // "login" | "signup"
@@ -56,7 +59,7 @@ function App() {
     checkAuth();
   }, [checkAuth]);
 
-  // When authUser changes, load profile + chats
+  // When authUser changes, load profile + chats and manage socket
   useEffect(() => {
     if (authUser) {
       // 1) call myUser from userstore
@@ -71,9 +74,22 @@ function App() {
         fetchChats(page || 1, limit || 50);
       }
 
+      // initialize socket (cookie-based auth) once user is present
+      try {
+        initSocket();
+      } catch (e) {
+        console.warn("initSocket failed:", e?.message || e);
+      }
+
       setShowAuth(false);
       setActiveView("chat");
     } else {
+      // disconnect socket when logged out to clean up connections
+      try {
+        disconnectSocket();
+      } catch (e) {
+        // ignore
+      }
       // reset view when logged out
       setActiveView("chat");
     }
