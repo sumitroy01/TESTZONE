@@ -60,8 +60,7 @@ export const signUp = async (req, res) => {
       const duplicateUsername = await Users.findOne({ userName });
       if (
         duplicateUsername &&
-        (!myUser ||
-          duplicateUsername._id.toString() !== myUser._id.toString())
+        (!myUser || duplicateUsername._id.toString() !== myUser._id.toString())
       ) {
         return res
           .status(409)
@@ -354,12 +353,25 @@ export const logIn = async (req, res) => {
 
 export const logOut = async (req, res) => {
   try {
+    const isProd = process.env.NODE_ENV === "production";
+
+    // Match the cookie options used when setting it
+    res.clearCookie("jwt", {
+      httpOnly: true,
+      sameSite: isProd ? "none" : "lax",
+      secure: isProd,
+      path: "/",
+    });
+
+    // extra-safe: overwrite with expired cookie (optional)
     res.cookie("jwt", "", {
       maxAge: 0,
       httpOnly: true,
-      sameSite: "strict",
-      secure: process.env.NODE_ENV === "production",
+      sameSite: isProd ? "none" : "lax",
+      secure: isProd,
+      path: "/",
     });
+
     return res.status(200).json({ message: "logged out successfully" });
   } catch (error) {
     console.log("error in logout controller", error.message || error);
@@ -472,7 +484,12 @@ export const resetPassword = async (req, res) => {
 
     await myUser.save();
 
-    res.clearCookie("jwt");
+    res.clearCookie("jwt", {
+      httpOnly: true,
+      sameSite: isProd ? "none" : "lax",
+      secure: isProd,
+      path: "/",
+    });
 
     return res
       .status(200)
