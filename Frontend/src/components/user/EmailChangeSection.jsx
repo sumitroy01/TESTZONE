@@ -13,25 +13,24 @@ function EmailChangeSection({
   const [otp, setOtp] = useState("");
   const [emailStep, setEmailStep] = useState("request");
   const [isEditing, setIsEditing] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleRequestEmail = async (e) => {
-  e.preventDefault();
-  const { success } = await requestEmailUpdate({ email, password });
-  if (!success) return;
-  setEmailStep("verify");
-};
-
+    e.preventDefault();
+    const { success } = await requestEmailUpdate({ email, password });
+    if (!success) return;
+    setEmailStep("verify");
+  };
 
   const handleVerifyEmail = async (e) => {
-  e.preventDefault();
-  if (!otp.trim()) return;
+    e.preventDefault();
+    if (!otp.trim()) return;
 
-  const { success } = await updateEmail(otp.trim());
-  if (!success) return;
+    const { success } = await updateEmail(otp.trim());
+    if (!success) return;
 
-  window.location.reload();
-};
-
+    window.location.reload();
+  };
 
   const handleResend = (e) => {
     e.preventDefault();
@@ -44,6 +43,7 @@ function EmailChangeSection({
       setPassword("");
       setOtp("");
       setEmailStep("request");
+      setShowPassword(false);
     }
     setIsEditing((prev) => !prev);
   };
@@ -101,13 +101,22 @@ function EmailChangeSection({
             <label className="text-[11px] text-neutral-300">
               Current password
             </label>
-            <input
-              type="password"
-              className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-xs outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/60"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 pr-8 text-xs outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/60"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 text-xs"
+                onClick={() => setShowPassword((s) => !s)}
+              >
+                {showPassword ? "🙈" : "👁️"}
+              </button>
+            </div>
             <p className="text-[10px] text-neutral-500">
               We use your password to confirm it&apos;s really you.
             </p>
@@ -164,6 +173,7 @@ function EmailChangeSection({
                   setEmailStep("request");
                   setOtp("");
                   setPassword("");
+                  setShowPassword(false);
                 }}
                 className="px-3 py-1.5 rounded-xl border border-white/15 text-[11px] text-neutral-300 hover:bg-white/5"
               >

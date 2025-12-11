@@ -31,6 +31,8 @@ function ChatPage() {
     isUpdatingGroup,
     deleteChat,
     isDeletingChat,
+    // NEW: didLoadChats flag from store
+    didLoadChats,
   } = chatstore();
 
   const {
@@ -61,11 +63,12 @@ function ChatPage() {
     : null;
   const messages = activeMessagesEntry?.data || [];
 
+  // INITIAL LOAD: only attempt once (use didLoadChats to avoid loop when server returns data:[])
   useEffect(() => {
-    if (!chats.length && !isFetchingChats) {
+    if (!chats.length && !isFetchingChats && !didLoadChats) {
       fetchChats(1, limit);
     }
-  }, [chats, isFetchingChats, fetchChats, limit]);
+  }, [chats.length, isFetchingChats, didLoadChats, fetchChats, limit]);
 
   useEffect(() => {
     if (selectedChat && !messagesByChat[selectedChat._id]) {

@@ -34,6 +34,9 @@ const chatstore = create((set, get) => ({
   limit: 50,
   hasMore: true,
 
+  // NEW: mark whether we've attempted the initial load already
+  didLoadChats: false,
+
   setSelectedChat: (chat) => {
     set({ selectedChat: normalizeChat(chat) });
   },
@@ -68,11 +71,10 @@ const chatstore = create((set, get) => ({
       });
     } catch (error) {
       console.log("error in fetchChats:", error?.response?.data || error);
-      toast.error(
-        error?.response?.data?.message || "failed to load chats"
-      );
+      toast.error(error?.response?.data?.message || "failed to load chats");
     } finally {
-      set({ isFetchingChats: false });
+      // ensure we mark that we attempted loading chats so we don't loop
+      set({ isFetchingChats: false, didLoadChats: true });
     }
   },
 
@@ -95,9 +97,7 @@ const chatstore = create((set, get) => ({
       });
     } catch (error) {
       console.log("error in accessChat:", error?.response?.data || error);
-      toast.error(
-        error?.response?.data?.message || "failed to access chat"
-      );
+      toast.error(error?.response?.data?.message || "failed to access chat");
     } finally {
       set({ isAccessingChat: false });
     }
@@ -138,13 +138,8 @@ const chatstore = create((set, get) => ({
 
       toast.success("group created sucessfully");
     } catch (error) {
-      console.log(
-        "error in createGroupChat:",
-        error?.response?.data || error
-      );
-      toast.error(
-        error?.response?.data?.message || "failed to create group"
-      );
+      console.log("error in createGroupChat:", error?.response?.data || error);
+      toast.error(error?.response?.data?.message || "failed to create group");
     } finally {
       set({ isCreatingGroup: false });
     }
@@ -198,9 +193,7 @@ const chatstore = create((set, get) => ({
       toast.success("group renamed sucessfully");
     } catch (error) {
       console.log("error in renameGroup:", error?.response?.data || error);
-      toast.error(
-        error?.response?.data?.message || "failed to rename group"
-      );
+      toast.error(error?.response?.data?.message || "failed to rename group");
     } finally {
       set({ isRenamingGroup: false });
     }
@@ -235,9 +228,7 @@ const chatstore = create((set, get) => ({
       toast.success("user added to group");
     } catch (error) {
       console.log("error in addToGroup:", error?.response?.data || error);
-      toast.error(
-        error?.response?.data?.message || "failed to add user"
-      );
+      toast.error(error?.response?.data?.message || "failed to add user");
     } finally {
       set({ isUpdatingGroup: false });
     }
@@ -287,9 +278,7 @@ const chatstore = create((set, get) => ({
         "error in removeFromGroup:",
         error?.response?.data || error
       );
-      toast.error(
-        error?.response?.data?.message || "failed to remove user"
-      );
+      toast.error(error?.response?.data?.message || "failed to remove user");
     } finally {
       set({ isUpdatingGroup: false });
     }
@@ -316,14 +305,11 @@ const chatstore = create((set, get) => ({
       toast.success("chat deleted");
     } catch (error) {
       console.log("error in deleteChat:", error?.response?.data || error);
-      toast.error(
-        error?.response?.data?.message || "failed to delete chat"
-      );
+      toast.error(error?.response?.data?.message || "failed to delete chat");
     } finally {
       set({ isDeletingChat: false });
     }
   },
-
 }));
 
 export default chatstore;
