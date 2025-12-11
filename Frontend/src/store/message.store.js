@@ -17,6 +17,71 @@ const messageStore = create((set, get) => ({
   isDeletingMessage: false,
   isDeletingChat: false,
 
+  // --- NEW: ensure a chat entry exists
+  ensureChatMessagesEntry: (chatId) => {
+    if (!chatId) return;
+    const state = get();
+    const existing = state.messagesByChat[chatId];
+    if (!existing) {
+      set((s) => ({
+        messagesByChat: {
+          ...s.messagesByChat,
+          [chatId]: { data: [], page: 1, limit: 50, hasMore: true },
+        },
+      }));
+    }
+  },
+
+  // --- NEW: push an incoming message (from socket) into the store (deduped)
+  pushIncomingMessage: (message) => {
+    if (!message) return;
+    const chatId =
+      (message.chat && (message.chat._id || message.chat)) ||
+      message.chatId ||
+      message.chat_id;
+    if (!chatId) return;
+
+    // ensure chat entry exists
+    get().ensureChatMessagesEntry(chatId);
+
+    set((state) => {
+      const entry = state.messagesByChat[chatId] || {
+        data: [],
+        page: 1,
+        limit: 50,
+        hasMore: true,
+      };
+
+      // prevent duplicate by _id
+      const exists =
+        (entry.data || []).some((m) => String(m._id) === String(message._id)) ||
+        false;
+
+      const newData = exists ? entry.data : [...(entry.data || []), message];
+
+      const sorted = sortMessagesAsc(newData);
+
+      return {
+        messagesByChat: {
+          ...state.messagesByChat,
+          [chatId]: {
+            ...entry,
+            data: sorted,
+          },
+        },
+      };
+    });
+  },
+
+  // --- NEW: add a local (optimistic) message
+  // Use this before sending to show immediate UI feedback.
+  // Make sure to give the local message a unique _id (e.g. `temp-${Date.now()}`)
+  addLocalMessage: (message) => {
+    if (!message) return;
+    // For compatibility with pushIncomingMessage we'll call it directly
+    get().pushIncomingMessage(message);
+  },
+
   // FETCH MESSAGES
   fetchMessages: async ({ chatId, page = 1, limit = 50, sort = "asc" }) => {
     // 👈 default asc
@@ -102,7 +167,17 @@ const messageStore = create((set, get) => ({
           hasMore: true,
         };
 
-        const merged = [...(existing.data || []), newMessage];
+        // if there is a local temp message with same temp id, replace it
+        // otherwise append server message
+        const replaced = existing.data.map((m) =>
+          m && m._id && String(m._id).startsWith("temp-") && newMessage.clientTempId && String(m._id) === String(newMessage.clientTempId)
+            ? newMessage
+            : m
+        );
+
+        const hasTempReplaced = replaced.some((m) => String(m._id) === String(newMessage._id));
+
+        const merged = hasTempReplaced ? replaced : [...(existing.data || []), newMessage];
         const sorted = sortMessagesAsc(merged); // 👈 keep timeline consistent
 
         return {

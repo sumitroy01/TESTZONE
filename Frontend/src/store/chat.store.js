@@ -37,6 +37,90 @@ const chatstore = create((set, get) => ({
   // NEW: mark whether we've attempted the initial load already
   didLoadChats: false,
 
+  // Helper: insert or update a chat and move it to the top
+  insertOrUpdateChat: (chat, lastMessage) => {
+    if (!chat) return;
+    const n = normalizeChat(chat);
+    if (lastMessage) {
+      // keep old key name used elsewhere (latestMessage), and also lastMessage for clarity
+      n.latestMessage = lastMessage;
+      n.lastMessage = lastMessage;
+    }
+
+    set((s) => {
+      const chats = s.chats || [];
+      const exists = chats.find((c) => c._id === n._id);
+
+      let updatedChats;
+      if (exists) {
+        updatedChats = chats.map((c) => (c._id === n._id ? { ...c, ...n } : c));
+      } else {
+        updatedChats = [n, ...chats];
+      }
+
+      // ensure target chat is at the front
+      const target = updatedChats.find((c) => c._id === n._id);
+      const rest = updatedChats.filter((c) => c._id !== n._id);
+      return { chats: target ? [target, ...rest] : updatedChats };
+    });
+  },
+
+  // Called when a new message arrives via socket
+  handleIncomingMessage: (message) => {
+    if (!message) return;
+    // message.chat may be a populated chat object or an id
+    const chat = message.chat || (message.chatId ? { _id: message.chatId } : null);
+    if (!chat) return;
+
+    // attach the message as latest/lastMessage so UI shows preview
+    get().insertOrUpdateChat(chat, message);
+  },
+
+  // Called when a chat is created (e.g. someone created a group or accessChat created a 1:1)
+  handleChatCreated: (chat) => {
+    if (!chat) return;
+    get().insertOrUpdateChat(chat);
+  },
+
+  // Called when a chat is updated (rename, avatar change, members changed)
+  handleChatUpdated: (chat) => {
+    if (!chat) return;
+    const normalized = normalizeChat(chat);
+    set((s) => {
+      const chats = s.chats || [];
+      const updatedChats = chats.map((c) =>
+        c._id === normalized._id ? { ...c, ...normalized } : c
+      );
+      // keep selectedChat in sync if it's the same chat
+      const selectedChat = s.selectedChat;
+      const newSelected =
+        selectedChat && selectedChat._id === normalized._id
+          ? { ...selectedChat, ...normalized }
+          : selectedChat;
+
+      // move updated chat to top
+      const target = updatedChats.find((c) => c._id === normalized._id);
+      const rest = updatedChats.filter((c) => c._id !== normalized._id);
+
+      return {
+        chats: target ? [target, ...rest] : updatedChats,
+        selectedChat: newSelected,
+      };
+    });
+  },
+
+  // Called when a chat is deleted
+  handleChatDeleted: (chatId) => {
+    if (!chatId) return;
+    set((s) => {
+      const chats = s.chats || [];
+      const filtered = chats.filter((c) => c._id !== chatId);
+      const selectedChat = s.selectedChat;
+      const newSelected = selectedChat && selectedChat._id === chatId ? null : selectedChat;
+      return { chats: filtered, selectedChat: newSelected };
+    });
+  },
+
   setSelectedChat: (chat) => {
     set({ selectedChat: normalizeChat(chat) });
   },
@@ -278,7 +362,9 @@ const chatstore = create((set, get) => ({
         "error in removeFromGroup:",
         error?.response?.data || error
       );
-      toast.error(error?.response?.data?.message || "failed to remove user");
+      toast.error(
+        error?.response?.data?.message || "failed to remove user"
+      );
     } finally {
       set({ isUpdatingGroup: false });
     }

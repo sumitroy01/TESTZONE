@@ -6,6 +6,15 @@ import Users from "../models/user-models.js";
 const toObjectId = (id) =>
   mongoose.Types.ObjectId.isValid(id) ? mongoose.Types.ObjectId(id) : null;
 
+/**
+ * Helper to get socket.io instance if available.
+ * Preferred: set io on express app with app.set('io', io)
+ * Fallback: global.io if you attached it there.
+ */
+const getIo = (req) => {
+  return (req && req.app && req.app.get && req.app.get("io")) || global.io || null;
+};
+
 export const accessChat = async (req, res) => {
   try {
     const otherUserId = req.body.userId || req.query.userId;
@@ -54,6 +63,20 @@ export const accessChat = async (req, res) => {
     full.isGroupChat = !!full.isGroup;
     full.users = full.allUsers;
 
+    // emit real-time event to both users (if io available)
+    try {
+      const io = getIo(req);
+      if (io && Array.isArray(full.users)) {
+        full.users.forEach((u) => {
+          if (u && u._id) {
+            io.to(String(u._id)).emit("chatCreated", full);
+          }
+        });
+      }
+    } catch (emitErr) {
+      console.warn("emit chatCreated failed:", emitErr);
+    }
+
     return res.status(201).json(full);
   } catch (err) {
     console.error("error in accessChat controller:", err);
@@ -97,6 +120,7 @@ export const fetchChats = async (req, res) => {
       .json({ message: "Server error", error: err.message });
   }
 };
+
 export const createGroupChat = async (req, res) => {
   try {
     const { name, users, groupAvatar } = req.body;
@@ -137,6 +161,19 @@ export const createGroupChat = async (req, res) => {
       .populate("admins", "-password");
     const obj = populated.toObject();
     obj.latestMessage = null;
+
+    // emit chatCreated to every member
+    try {
+      const io = getIo(req);
+      if (io && Array.isArray(obj.allUsers)) {
+        obj.allUsers.forEach((u) => {
+          io.to(String(u)).emit("chatCreated", obj);
+        });
+      }
+    } catch (emitErr) {
+      console.warn("emit chatCreated failed:", emitErr);
+    }
+
     return res.status(201).json(obj);
   } catch (err) {
     console.error(err);
@@ -145,6 +182,7 @@ export const createGroupChat = async (req, res) => {
       .json({ message: "Server error", error: err.message });
   }
 };
+
 export const renameGroup = async (req, res) => {
   try {
     // ✅ make this safe even if req.body is undefined
@@ -192,6 +230,18 @@ export const renameGroup = async (req, res) => {
     const obj = populated.toObject();
     obj.latestMessage = latest || null;
 
+    // emit chatUpdated to all members
+    try {
+      const io = getIo(req);
+      if (io && Array.isArray(obj.allUsers)) {
+        obj.allUsers.forEach((u) => {
+          io.to(String(u)).emit("chatUpdated", obj);
+        });
+      }
+    } catch (emitErr) {
+      console.warn("emit chatUpdated failed:", emitErr);
+    }
+
     return res.json(obj);
   } catch (err) {
     console.error(err);
@@ -200,7 +250,6 @@ export const renameGroup = async (req, res) => {
       .json({ message: "Server error", error: err.message });
   }
 };
-
 
 export const addToGroup = async (req, res) => {
   try {
@@ -233,6 +282,21 @@ export const addToGroup = async (req, res) => {
       .populate("sender", "-password");
     const obj = populated.toObject();
     obj.latestMessage = latest || null;
+
+    // emit chatUpdated to all members & addedToGroup to the new user
+    try {
+      const io = getIo(req);
+      if (io && Array.isArray(obj.allUsers)) {
+        obj.allUsers.forEach((u) => {
+          io.to(String(u)).emit("chatUpdated", obj);
+        });
+        // notify the added user specifically
+        io.to(String(userId)).emit("addedToGroup", obj);
+      }
+    } catch (emitErr) {
+      console.warn("emit addToGroup notifications failed:", emitErr);
+    }
+
     return res.json(obj);
   } catch (err) {
     console.error(err);
@@ -269,9 +333,24 @@ export const removeFromGroup = async (req, res) => {
     await chat.save();
 
     if ((chat.allUsers || []).length <= 1) {
+      // capture previous members to notify them about deletion
+      const previousMembers = [...(chat.allUsers || []), String(userId)];
       await Chats.findByIdAndDelete(chat._id);
       // optionally delete messages too
       await Messages.deleteMany({ chat: chat._id });
+
+      // notify previous members that chat was deleted
+      try {
+        const io = getIo(req);
+        if (io && Array.isArray(previousMembers)) {
+          previousMembers.forEach((u) => {
+            io.to(String(u)).emit("chatDeleted", { chatId: String(chat._id) });
+          });
+        }
+      } catch (emitErr) {
+        console.warn("emit chatDeleted failed:", emitErr);
+      }
+
       return res.json({
         message: "group removed as too few members remained; chat deleted",
       });
@@ -285,6 +364,23 @@ export const removeFromGroup = async (req, res) => {
       .populate("sender", "-password");
     const obj = populated.toObject();
     obj.latestMessage = latest || null;
+
+    // emit chatUpdated to remaining members and removedFromGroup to the removed user
+    try {
+      const io = getIo(req);
+      if (io) {
+        (obj.allUsers || []).forEach((u) => {
+          io.to(String(u)).emit("chatUpdated", obj);
+        });
+        io.to(String(userId)).emit("removedFromGroup", {
+          chatId: String(chat._id),
+          removedUserId: String(userId),
+        });
+      }
+    } catch (emitErr) {
+      console.warn("emit removeFromGroup notifications failed:", emitErr);
+    }
+
     return res.json(obj);
   } catch (err) {
     console.error(err);
@@ -310,8 +406,23 @@ export const deleteChat = async (req, res) => {
         .json({ message: "not allowed to delete this chat" });
     }
 
+    // capture previous members to notify them
+    const previousMembers = (chat.allUsers || []).map(String);
+
     await Chats.findByIdAndDelete(chatId);
     await Messages.deleteMany({ chat: chatId });
+
+    // notify previous members the chat was deleted
+    try {
+      const io = getIo(req);
+      if (io && Array.isArray(previousMembers)) {
+        previousMembers.forEach((u) => {
+          io.to(String(u)).emit("chatDeleted", { chatId: String(chatId) });
+        });
+      }
+    } catch (emitErr) {
+      console.warn("emit chatDeleted failed:", emitErr);
+    }
 
     return res.json({ message: "chat deleted", chatId });
   } catch (err) {

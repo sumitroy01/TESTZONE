@@ -3,12 +3,20 @@
 import Messages from "../models/message-models.js";
 import Chats from "../models/chat-models.js";
 import { v2 as cloudinary } from "cloudinary";
-// controllers/message-controller.js
+
+/**
+ * Safe helper to get socket.io instance
+ * Prefer: app.set('io', io) when initializing your server.
+ * Fallback: global.io if you attach it there.
+ */
+const getIo = (req) => {
+  return (req && req.app && req.app.get && req.app.get("io")) || global.io || null;
+};
 
 export const getMessagesForChat = async (req, res) => {
   try {
     const { chatId } = req.params;
-    const { page = 1, limit = 50, sort = "asc" } = req.query; // 👈 change "desc" → "asc"
+    const { page = 1, limit = 50, sort = "asc" } = req.query; // 👈 default asc
 
     if (!chatId) {
       return res.status(400).json({ message: "chatId required" });
@@ -39,6 +47,7 @@ export const getMessagesForChat = async (req, res) => {
       .json({ message: "Server error", error: err.message });
   }
 };
+
 export const sendMessage = async (req, res) => {
   try {
     const body = req.body || {};
@@ -109,11 +118,65 @@ export const sendMessage = async (req, res) => {
       .populate("chat");
 
     try {
+      // Update chat.latestMessage to point to this message id
       await Chats.findByIdAndUpdate(chatId, {
         latestMessage: fullMessage._id,
       });
     } catch (err) {
       console.log("failed to update latestMessage on chat:", err.message);
+    }
+
+    // Try to fetch the populated chat (with users) to emit a useful chatUpdated payload
+    let populatedChat = null;
+    try {
+      const chatDoc = await Chats.findById(chatId)
+        .populate("allUsers", "-password")
+        .populate("admins", "-password");
+
+      if (chatDoc) {
+        const latest = await Messages.findOne({ chat: chatDoc._id })
+          .sort({ createdAt: -1 })
+          .populate("sender", "-password");
+        const obj = chatDoc.toObject();
+        obj.latestMessage = latest || null;
+        obj.isGroupChat = !!obj.isGroup;
+        obj.users = obj.allUsers;
+        populatedChat = obj;
+      }
+    } catch (err) {
+      // non-fatal
+      console.warn("failed to prepare populatedChat for emits:", err.message);
+    }
+
+    // Emit socket events: newMessage to all participants, chatUpdated to update chat list
+    try {
+      const io = getIo(req);
+      if (io) {
+        const recipients = (populatedChat && Array.isArray(populatedChat.allUsers))
+          ? populatedChat.allUsers.map((u) => String(u))
+          : (Array.isArray(chat.allUsers) ? chat.allUsers.map((u) => String(u)) : []);
+
+        // Fallback: if we don't have a recipient list, attempt to use chat.allUsers
+        if (recipients && recipients.length) {
+          recipients.forEach((userId) => {
+            // send the message payload (fullMessage) to each recipient's room
+            io.to(String(userId)).emit("newMessage", fullMessage);
+
+            // also emit chatUpdated so clients can update lastMessage / order
+            if (populatedChat) {
+              io.to(String(userId)).emit("chatUpdated", populatedChat);
+            }
+          });
+        } else {
+          // If recipients list unavailable, broadcast newMessage (not ideal but better than nothing)
+          io.emit("newMessage", fullMessage);
+          if (populatedChat) {
+            io.emit("chatUpdated", populatedChat);
+          }
+        }
+      }
+    } catch (emitErr) {
+      console.warn("emit newMessage/chatUpdated failed:", emitErr);
     }
 
     return res.status(201).json(fullMessage);
@@ -124,6 +187,7 @@ export const sendMessage = async (req, res) => {
       .json({ message: "Server error", error: err.message });
   }
 };
+
 // PUT /api/message/read
 export const markMessagesRead = async (req, res) => {
   try {

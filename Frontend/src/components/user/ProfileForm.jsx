@@ -134,9 +134,7 @@ function ProfileForm({ effectiveUser, updateProfile, isUpdatingProfile }) {
         )}
 
         <p className="text-[10px] text-neutral-500">
-          Paste an image URL or select a file from your system. The backend will
-          use <code className="text-[10px] bg-slate-800/80 px-1 rounded">req.file</code>{" "}
-          when a file is uploaded.
+          Paste an image URL or select a file from your system.
         </p>
       </div>
 
