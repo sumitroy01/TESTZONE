@@ -35,7 +35,7 @@ export function initSocket(server, opts = {}) {
 
   io = new Server(server, {
     cors: {
-      origin: opts.corsOrigins || ["http://localhost:5173"],
+      origin: process.env.FRONTEND_URL,
       credentials: true,
     },
   });
