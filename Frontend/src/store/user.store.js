@@ -37,10 +37,9 @@ const userstore = create((set, get) => ({
         params: { userName: value },
       });
       const user = res.data?.user ?? res.data;
-
-      console.log("search response user:", user);
       set({ userFound: user || null });
-      console.log("userFound after set:", get().userFound);
+      console.log("user found successfully");
+      
     } catch (error) {
       const message =
         error?.response?.data?.message ||

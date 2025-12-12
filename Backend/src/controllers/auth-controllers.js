@@ -354,19 +354,26 @@ export const logIn = async (req, res) => {
 
 export const logOut = async (req, res) => {
   try {
+    // Make sure the options here match those used in generateToken when creating the cookie
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.COOKIE_SAMESITE || "none",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       path: "/",
+      // domain: process.env.COOKIE_DOMAIN || undefined, // enable if you set a domain when setting cookie
     };
+
+    // explicit clear with empty value + expires for extra reliability
+    res.cookie("jwt", "", { ...cookieOptions, maxAge: 0, expires: new Date(0) });
     res.clearCookie("jwt", cookieOptions);
+
     return res.status(200).json({ message: "logged out successfully" });
   } catch (error) {
     console.log("error in logout controller", error.message || error);
     return res.status(500).json({ message: "internal server error" });
   }
 };
+
 
 
 

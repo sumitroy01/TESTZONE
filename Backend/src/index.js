@@ -17,15 +17,44 @@ import userRoutes from "./routes/user-routes.js";
 
 const app = express();
 
+const allowedOrigins = [
+  process.env.FRONTEND_URL,   // e.g. "https://donate-v2-jgkc.onrender.com"
+  "http://localhost:5173",
+  "http://localhost:3000"
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // allow requests with no origin (e.g. curl, mobile) or if origin is in allowedOrigins
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+ allowedHeaders: [
+  "Content-Type",
+  "Authorization",
+  "X-Requested-With",
+  "Accept",
+  "Cache-Control",
+  "Origin"
+],
+
+};
+
+// apply CORS globally
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
+
+
 // Middlewares
 app.use(express.json());
 app.use(cookieParser());
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL,
-    credentials: true,
-  })
-);
+
+
 
 
 app.use("/api/auth/", authRoutes);
@@ -38,6 +67,12 @@ const server = http.createServer(app);
 const io = initSocket(server); // init socket with http server
 attachSocketHandlers(io);
 
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
 // Start server after DB connection
 const PORT = process.env.PORT ;
 

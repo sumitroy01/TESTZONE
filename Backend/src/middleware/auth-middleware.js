@@ -10,7 +10,6 @@ export const protectRoute = async (req, res, next) => {
         .status(401)
         .json({ message: "No user credentials found!! please login/signup" });
     }
-
     let decoded;
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
@@ -18,7 +17,14 @@ export const protectRoute = async (req, res, next) => {
       return res.status(401).json({ message: "token has been expired" });
     }
 
-    const user = await Users.findById(decoded.userId).select("-password");
+    // support possible variations and log cookies for debugging
+    const uid = decoded?.userId || decoded?.userID || decoded?.id;
+    if (!uid) {
+      console.log("auth: token decoded but no user id present:", decoded);
+      return res.status(401).json({ message: "invalid token payload" });
+    }
+
+    const user = await Users.findById(uid).select("-password");
 
     if (!user) {
       return res
