@@ -19,11 +19,11 @@ export async function sendOtp(to, otp) {
   const msg = {
     to,
     from: FROM, 
-    subject: "Your DonateUs verification code",
+    subject: "Your YapYap verification code",
     text: `Your OTP is ${otp}. It will expire in 5 minutes.`,
     html: `
       <div style="font-family:sans-serif;line-height:1.5">
-        <h2>Welcome to DonateUs 🎁</h2>
+        <h2>Welcome to YapYap 🗣️ </h2>
         <p>Your OTP is:</p>
         <h1 style="color:#007bff;">${otp}</h1>
         <p>This code expires in <strong>5 minutes</strong>.</p>
