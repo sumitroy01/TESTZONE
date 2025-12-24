@@ -64,11 +64,6 @@ function ChatPage() {
     : null;
   const messages = activeMessagesEntry?.data || [];
 
-  // useEffect(() => {
-  //   if (!chats.length && !isFetchingChats) {
-  //     fetchChats(1, limit);
-  //   }
-  // }, [chats, isFetchingChats, fetchChats, limit]);
  useEffect(() => {
   if (chats.length === 0 && !isFetchingChats) {
     fetchChats(1, limit);
@@ -77,14 +72,34 @@ function ChatPage() {
 
 
 
-  useEffect(() => {
-    if (selectedChat && !messagesByChat[selectedChat._id]) {
-      fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
-      if (authUser?._id) {
-        markAsRead({ chatId: selectedChat._id, userId: authUser._id });
-      }
-    }
-  }, [selectedChat, messagesByChat, fetchMessages, markAsRead, authUser]);
+  // useEffect(() => {
+  //   if (selectedChat && !messagesByChat[selectedChat._id]) {
+  //     fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
+  //     if (authUser?._id) {
+  //       markAsRead({ chatId: selectedChat._id, userId: authUser._id });
+  //     }
+  //   }
+  // }, [selectedChat, messagesByChat, fetchMessages, markAsRead, authUser]);
+useEffect(() => {
+  if (!selectedChat?._id) return;
+
+  if (!messagesByChat[selectedChat._id]) {
+    fetchMessages({
+      chatId: selectedChat._id,
+      page: 1,
+      limit: 50,
+    });
+  }
+}, [selectedChat?._id, messagesByChat, fetchMessages]);
+useEffect(() => {
+  if (!selectedChat?._id || !authUser?._id) return;
+
+  markAsRead({
+    chatId: selectedChat._id,
+    userId: authUser._id,
+  });
+}, [selectedChat?._id, authUser?._id]);
+
 
   const sortedChats = useMemo(() => {
     return [...chats].sort((a, b) => {
