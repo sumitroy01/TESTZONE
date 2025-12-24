@@ -3,6 +3,7 @@ import { axiosInstance } from "../lib/axios";
 import toast from "react-hot-toast";
 
 /* ---------- helpers ---------- */
+const readSentForChat = new Set();
 
 const handleAuthError = (error) => {
   if (error?.response?.status === 401) {
@@ -133,44 +134,63 @@ const messageStore = create((set, get) => ({
 
   /* ---------- mark as read (REST) ---------- */
 
-  markAsRead: async ({ chatId, messageId, userId, silent = true }) => {
-    if (!chatId && !messageId) return { success: false };
+  // markAsRead: async ({ chatId, messageId, userId, silent = true }) => {
+  //   if (!chatId && !messageId) return { success: false };
 
-    set({ isMarkingRead: true });
-    try {
-      await axiosInstance.put("/api/message/read", { chatId, messageId });
+  //   set({ isMarkingRead: true });
+  //   try {
+  //     await axiosInstance.put("/api/message/read", { chatId, messageId });
 
-      // optimistic local update
-      set((state) => {
-        const updated = { ...state.messagesByChat };
+  //     // optimistic local update
+  //     set((state) => {
+  //       const updated = { ...state.messagesByChat };
 
-        Object.values(updated).forEach((entry) => {
-          if (!entry?.data) return;
+  //       Object.values(updated).forEach((entry) => {
+  //         if (!entry?.data) return;
 
-          entry.data = entry.data.map((msg) => {
-            if (messageId && String(msg._id) !== String(messageId)) return msg;
-            if ((msg.readBy || []).includes(userId)) return msg;
+  //         entry.data = entry.data.map((msg) => {
+  //           if (messageId && String(msg._id) !== String(messageId)) return msg;
+  //           if ((msg.readBy || []).includes(userId)) return msg;
 
-            return {
-              ...msg,
-              readBy: [...(msg.readBy || []), userId],
-            };
-          });
-        });
+  //           return {
+  //             ...msg,
+  //             readBy: [...(msg.readBy || []), userId],
+  //           };
+  //         });
+  //       });
 
-        return { messagesByChat: updated };
-      });
+  //       return { messagesByChat: updated };
+  //     });
 
-      if (!silent) toast.success("marked as read");
-      return { success: true };
-    } catch (error) {
-      if (handleAuthError(error)) return { success: false };
-      if (!silent) toast.error("could not mark as read");
-      return { success: false };
-    } finally {
-      set({ isMarkingRead: false });
-    }
-  },
+  //     if (!silent) toast.success("marked as read");
+  //     return { success: true };
+  //   } catch (error) {
+  //     if (handleAuthError(error)) return { success: false };
+  //     if (!silent) toast.error("could not mark as read");
+  //     return { success: false };
+  //   } finally {
+  //     set({ isMarkingRead: false });
+  //   }
+  // },
+markAsRead: async ({ chatId, userId, silent = true }) => {
+  if (!chatId || !userId) return { success: false };
+
+  // 🛑 HARD STOP — prevents request spam
+  if (readSentForChat.has(chatId)) {
+    return { success: true };
+  }
+
+  readSentForChat.add(chatId);
+
+  try {
+    await axiosInstance.put("/api/message/read", { chatId });
+    return { success: true };
+  } catch (error) {
+    // rollback if request failed
+    readSentForChat.delete(chatId);
+    return { success: false };
+  }
+},
 
   /* ---------- delete message ---------- */
 

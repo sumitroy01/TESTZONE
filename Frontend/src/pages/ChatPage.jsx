@@ -17,7 +17,6 @@ function ChatPage() {
 
   /* ---------- refs ---------- */
   const prevChatIdRef = useRef(null);
-  const readMarkedRef = useRef(new Set()); // 🔥 prevents read loops
 
   /* ---------- stores ---------- */
   const {
@@ -46,7 +45,7 @@ function ChatPage() {
     sendMessage,
     isSendingMessage,
     isFetchingMessages,
-    markAsRead,
+    markAsRead, // 🔒 guarded in store
   } = messageStore();
 
   const findUser = userstore((state) => state.findUser);
@@ -68,47 +67,41 @@ function ChatPage() {
 
   const messages = activeMessagesEntry?.data || [];
 
-  /* ---------- initial chat fetch ---------- */
   
-  /* ---------- chat open / switch (CRITICAL LOGIC) ---------- */
+  /* ---------- CHAT OPEN / SWITCH (ONLY PLACE READ IS TRIGGERED) ---------- */
   useEffect(() => {
     if (!selectedChat || !authUser?._id) return;
 
     const socket = getSocket();
     const chatId = String(selectedChat._id);
 
-    /* leave previous room */
+    // leave previous room
     if (prevChatIdRef.current && prevChatIdRef.current !== chatId) {
       socket?.emit("leave_room", prevChatIdRef.current);
       markLeftRoom(prevChatIdRef.current);
     }
 
-    /* join new room */
+    // join new room
     socket?.emit("join_room", chatId);
     markJoinedRoom(chatId);
     prevChatIdRef.current = chatId;
 
-    /* fetch messages once */
+    // fetch messages if not already loaded
     if (!messagesByChat[chatId]) {
       fetchMessages({ chatId, page: 1, limit: 50 });
     }
 
-    /* ✅ mark read ONLY ONCE PER CHAT */
-    if (!readMarkedRef.current.has(chatId)) {
-      markAsRead({
-        chatId,
-        userId: authUser._id,
-        silent: true,
-      });
-
-      readMarkedRef.current.add(chatId);
-    }
+    // ✅ READ TRIGGER (SAFE — STORE GUARDED)
+    markAsRead({
+      chatId,
+      userId: authUser._id,
+      silent: true,
+    });
   }, [selectedChat, authUser, fetchMessages, markAsRead]);
 
-  /* ---------- cleanup on unmount ---------- */
+  /* ---------- cleanup ---------- */
   useEffect(() => {
     return () => {
-      readMarkedRef.current.clear();
       const socket = getSocket();
       if (prevChatIdRef.current) {
         socket?.emit("leave_room", prevChatIdRef.current);
