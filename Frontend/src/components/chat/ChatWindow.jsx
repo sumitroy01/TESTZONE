@@ -107,26 +107,23 @@ function ChatMessages({
   isGroupChat,
   selectedChat,
 }) {
-  const { markAsRead, fetchMessages, deleteMessage } = messageStore();
+  const { markAsRead, fetchMessages } = messageStore();
 
-  const containerRef = useRef(null);
   const bottomRef = useRef(null);
 
-  /* ✅ MARK AS READ WHEN CHAT OPENS */
+  // ✅ MARK AS READ WHEN CHAT OPENS (ONLY chatId)
   useEffect(() => {
-    if (!chatId || !authUserId) return;
+    if (!chatId) return;
 
-    const markAndRefresh = async () => {
-      await markAsRead({ chatId, userId: authUserId });
-
-      
+    const run = async () => {
+      await markAsRead({ chatId });
       await fetchMessages({ chatId, page: 1, limit: 50 });
     };
 
-    markAndRefresh();
-  }, [chatId, authUserId, markAsRead, fetchMessages]);
+    run();
+  }, [chatId, markAsRead, fetchMessages]);
 
-  /* Auto-scroll */
+  // auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
@@ -150,10 +147,7 @@ function ChatMessages({
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="flex-1 overflow-y-auto px-3 py-3 space-y-2"
-    >
+    <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
       {!isFetchingMessages &&
         messages.map((msg) => {
           const isMine =

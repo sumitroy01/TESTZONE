@@ -173,44 +173,16 @@ const messageStore = create((set, get) => ({
   //     set({ isMarkingRead: false });
   //   }
   // },
+markAsRead: async ({ chatId }) => {
+  if (!chatId) return;
 
-markAsRead: async ({ chatId, userId, silent }) => {
   try {
     await api.put("/api/message/read", { chatId });
-
-    // UPDATE LOCAL STATE
-    set((state) => {
-      const entry = state.messagesByChat[chatId];
-      if (!entry) return {};
-
-      const updated = entry.data.map((msg) => {
-        if (
-          msg.sender?._id === userId ||
-          msg.readBy?.some((u) => String(u) === String(userId))
-        ) {
-          return msg;
-        }
-
-        return {
-          ...msg,
-          readBy: [...(msg.readBy || []), userId],
-        };
-      });
-
-      return {
-        messagesByChat: {
-          ...state.messagesByChat,
-          [chatId]: {
-            ...entry,
-            data: updated,
-          },
-        },
-      };
-    });
   } catch (err) {
-    if (!silent) console.error("markAsRead failed", err);
+    console.error("markAsRead failed", err);
   }
 },
+
 
 
   /* ---------- delete message ---------- */
