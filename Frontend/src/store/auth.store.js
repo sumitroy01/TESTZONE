@@ -11,7 +11,6 @@ const authStore = create((set, get) => ({
   isLogginOut: false,
   verficationPendingId: null,
 
-  
   checkAuth: async () => {
     try {
       const res = await axiosInstance.get("/api/auth/check");
@@ -104,6 +103,37 @@ const authStore = create((set, get) => ({
       toast.error("logout failed");
     } finally {
       set({ isLogginOut: false });
+    }
+  },
+  resetPass: async ({ email, otp, password }) => {
+    set({ isResettingPass: true });
+    try {
+      const res = await axiosInstance.post("/api/auth/password/reset", {
+        email,
+        otp,
+        password,
+      });
+
+      toast.success(res.data.message || "password reset successful");
+      return { success: true };
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "password reset failed");
+      return { success: false };
+    } finally {
+      set({ isResettingPass: false });
+    }
+  },
+  forgotPass: async (email) => {
+    try {
+      const res = await axiosInstance.post("/api/auth/password/request-reset", {
+        email,
+      });
+
+      toast.success(res.data.message || "OTP sent to email");
+      return { success: true };
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "failed to send reset OTP");
+      return { success: false };
     }
   },
 }));
