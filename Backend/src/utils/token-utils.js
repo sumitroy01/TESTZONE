@@ -8,9 +8,7 @@ export const generateToken = (userId, res) => {
   );
 
 
-  const isProd =
-    process.env.NODE_ENV === "production" &&
-    process.env.FORCE_HTTPS === "true";
+  const isProd = process.env.NODE_ENV === "production";
 
   res.cookie("jwt", token, {
     httpOnly: true,
