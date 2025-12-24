@@ -136,31 +136,6 @@ export const sendMessage = async (req, res) => {
 };
 
 // PUT /api/message/read
-// export const markMessagesRead = async (req, res) => {
-//   try {
-//     const { chatId, messageId } = req.body;
-//     const userId = req.user._id;
-
-//     if (!chatId && !messageId) {
-//       return res
-//         .status(400)
-//         .json({ message: "chatId or messageId is required" });
-//     }
-
-//     const filter = messageId ? { _id: messageId } : { chat: chatId };
-
-//     await Messages.updateMany(filter, {
-//       $addToSet: { readBy: userId },
-//     });
-
-//     return res.status(200).json({ message: "Marked as read" });
-//   } catch (err) {
-//     console.error("error in markMessagesRead:", err);
-//     return res
-//       .status(500)
-//       .json({ message: "Server error", error: err.message });
-//   }
-// };
 export const markMessagesRead = async (req, res) => {
   try {
     const { chatId, messageId } = req.body;
@@ -172,36 +147,20 @@ export const markMessagesRead = async (req, res) => {
         .json({ message: "chatId or messageId is required" });
     }
 
-    const filter = messageId
-      ? { _id: messageId }
-      : { chat: chatId, sender: { $ne: userId } };
+    const filter = messageId ? { _id: messageId } : { chat: chatId };
 
-    // 1️⃣ update
     await Messages.updateMany(filter, {
       $addToSet: { readBy: userId },
     });
 
-    // 2️⃣ FETCH UPDATED MESSAGES (🔥 KEY PART)
-    const updatedMessages = await Messages.find(
-      messageId ? { _id: messageId } : { chat: chatId }
-    )
-      .populate("sender", "name avatar")
-      .sort({ createdAt: 1 });
-
-    // 3️⃣ return them
-    return res.status(200).json({
-      message: "Marked as read",
-      messages: updatedMessages,
-    });
+    return res.status(200).json({ message: "Marked as read" });
   } catch (err) {
     console.error("error in markMessagesRead:", err);
-    return res.status(500).json({
-      message: "Server error",
-      error: err.message,
-    });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: err.message });
   }
 };
-
 
 // DELETE /api/message/:messageId
 export const deleteMessage = async (req, res) => {
