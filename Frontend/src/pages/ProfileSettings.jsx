@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 
-import userstore from "../store/user.store.js";
 import authStore from "../store/auth.store.js";
+import userstore from "../store/user.store.js";
 
 import UserSummaryCard from "../components/user/UserSummaryCard.jsx";
 import ProfileForm from "../components/user/ProfileForm.jsx";
@@ -10,11 +11,11 @@ import EmailChangeSection from "../components/user/EmailChangeSection.jsx";
 import toast from "react-hot-toast";
 
 function ProfileSettings() {
+  // 🔑 AUTH = single source of truth
   const { authUser, logOut } = authStore();
 
+  // 🔧 USER ACTIONS ONLY (no auth fetching here)
   const {
-    user,
-    myUser,
     requestDeleteAccount,
     confirmDeleteAccount,
     updateProfile,
@@ -25,16 +26,10 @@ function ProfileSettings() {
     isUpdatingEmail,
   } = userstore();
 
-  const effectiveUser = user || authUser || {};
-
-  useEffect(() => {
-    if (!user) {
-      myUser();
-    }
-  }, [user, myUser]);
+  // If auth not ready yet, don’t render
 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteStep, setDeleteStep] = useState(1); // 1 = enter password, 2 = enter otp
+  const [deleteStep, setDeleteStep] = useState(1);
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [isRequestingDelete, setIsRequestingDelete] = useState(false);
@@ -123,7 +118,7 @@ function ProfileSettings() {
 
           <div className="flex flex-col gap-6">
             <ProfileForm
-              effectiveUser={effectiveUser}
+              effectiveUser={authUser}
               updateProfile={updateProfile}
               isUpdatingProfile={isUpdatingProfile}
             />
@@ -146,6 +141,7 @@ function ProfileSettings() {
           />
           <div className="relative w-full max-w-md rounded-2xl bg-slate-900/90 border border-white/5 p-6">
             <h2 className="text-lg font-semibold mb-3">Delete account</h2>
+
             {deleteStep === 1 ? (
               <>
                 <p className="text-sm text-neutral-400 mb-4">
@@ -168,7 +164,7 @@ function ProfileSettings() {
                   <button
                     onClick={handleRequestOtp}
                     disabled={isRequestingDelete}
-                    className="px-3 py-1.5 rounded-xl border border-red-400/20 bg-red-500/10 text-red-300 text-sm hover:bg-red-500/20 transition"
+                    className="px-3 py-1.5 rounded-xl border border-red-400/20 bg-red-500/10 text-red-300 text-sm"
                   >
                     {isRequestingDelete ? "Sending..." : "Send OTP"}
                   </button>
@@ -177,8 +173,7 @@ function ProfileSettings() {
             ) : (
               <>
                 <p className="text-sm text-neutral-400 mb-4">
-                  Enter the OTP sent to your email to permanently delete your
-                  account.
+                  Enter the OTP sent to your email.
                 </p>
                 <input
                   value={otp}
@@ -213,7 +208,7 @@ function ProfileSettings() {
                   <button
                     onClick={handleConfirmDelete}
                     disabled={isConfirmingDelete}
-                    className="px-3 py-1.5 rounded-xl border border-red-400/20 bg-red-500/10 text-red-300 text-sm hover:bg-red-500/20 transition"
+                    className="px-3 py-1.5 rounded-xl border border-red-400/20 bg-red-500/10 text-red-300 text-sm"
                   >
                     {isConfirmingDelete ? "Deleting..." : "Confirm Delete"}
                   </button>

@@ -3,28 +3,11 @@ import { create } from "zustand";
 import { axiosInstance } from "../lib/axios";
 import toast from "react-hot-toast";
 
-const userstore = create((set, get) => ({
-  user: null,
+const userstore = create((set) => ({
   userFound: null,
-  isChekingUser: false,
   isUpdatingProfile: false,
   isUpdatingEmail: false,
   isSearchingUser: false,
-
-  emilUnverified: null,
-
-  myUser: async () => {
-    set({ isChekingUser: true });
-    try {
-      const res = await axiosInstance.get("/api/auth/check");
-      set({ user: res.data });
-    } catch (error) {
-      console.log(`error in finding user: ${error.message}`);
-      set({ user: null });
-    } finally {
-      set({ isChekingUser: false });
-    }
-  },
 
   findUser: async (userName) => {
     const value = userName && userName.trim();
@@ -36,18 +19,13 @@ const userstore = create((set, get) => ({
       const res = await axiosInstance.get("/api/user/get/user", {
         params: { userName: value },
       });
-      const user = res.data?.user ?? res.data;
-      set({ userFound: user || null });
-      console.log("user found successfully");
-      
+      set({ userFound: res.data?.user ?? res.data ?? null });
     } catch (error) {
-      const message =
+      toast.error(
         error?.response?.data?.message ||
-        error.message ||
-        "failed to search user";
-
-      console.log("error while searching user", error?.response || error);
-      toast.error(message);
+          error.message ||
+          "failed to search user"
+      );
       set({ userFound: null });
     } finally {
       set({ isSearchingUser: false });
@@ -59,26 +37,18 @@ const userstore = create((set, get) => ({
 
     try {
       const formData = new FormData();
-
       if (name !== undefined) formData.append("name", name);
       if (userName !== undefined) formData.append("userName", userName);
+      if (avatarFile) formData.append("avatar", avatarFile);
+      else if (avatar) formData.append("avatar", avatar);
 
-      if (avatarFile) {
-        formData.append("avatar", avatarFile);
-      } else if (avatar) {
-        formData.append("avatar", avatar);
-      }
+      await axiosInstance.post("/api/user/update-profile", formData);
 
-      await axiosInstance.post("/api/user/update-profile", formData, {
-        withCredentials: true,
-      });
-
-      toast.success("profile updated sucessfully");
+      toast.success("profile updated successfully");
       return { success: true };
     } catch (error) {
-      console.log(`error in updating profile`, error);
       toast.error(error?.response?.data?.message);
-      return { success: false, error };
+      return { success: false };
     } finally {
       set({ isUpdatingProfile: false });
     }
@@ -91,87 +61,67 @@ const userstore = create((set, get) => ({
         email,
         password,
       });
-
       toast.success("OTP sent to your new email");
       return { success: true };
     } catch (error) {
-      if (error.response?.status === 409) {
-        toast.error("This email is already in use");
-      } else if (error.response?.status === 401) {
-        toast.error("Incorrect password");
-      } else {
-        toast.error(error?.response?.data?.message);
-      }
-
-      console.log("error in requestEmailUpdate", error);
-      return { success: false, error };
+      toast.error(error?.response?.data?.message);
+      return { success: false };
     } finally {
       set({ isUpdatingEmail: false });
     }
   },
 
   updateEmail: async (otp) => {
-    set({ isUpdatingEmail: true });
     try {
       await axiosInstance.post("/api/user/email/change/confirm", { otp });
-
       toast.success("Email updated successfully");
       return { success: true };
     } catch (error) {
-      if (error.response?.status === 400) {
-        toast.error("Invalid or expired OTP");
-      } else {
-        toast.error("Failed to verify email");
-      }
-
-      console.log("error in updateEmail", error);
-      return { success: false, error };
-    } finally {
-      set({ isUpdatingEmail: false });
+      toast.error("Invalid or expired OTP");
+      return { success: false };
     }
   },
+
   requestDeleteAccount: async (password) => {
-  try {
-    await axiosInstance.post("/api/user/delete-account/request", { password });
-    toast.success("OTP sent to your email");
-    return { success: true };
-  } catch (error) {
-    const msg =
-      error?.response?.data?.message ||
-      error.message ||
-      "failed to request delete";
+    try {
+      await axiosInstance.post("/api/user/delete-account/request", {
+        password,
+      });
+      toast.success("OTP sent to your email");
+      return { success: true };
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.message ||
+          error.message ||
+          "failed to request delete"
+      );
+      return { success: false };
+    }
+  },
 
-    toast.error(msg);
-    return { success: false, error };
-  }
-},
-
-confirmDeleteAccount: async (otp) => {
-  try {
-    await axiosInstance.post("/api/user/delete-account/confirm", { otp });
-
-    toast.success("Account deleted successfully");
-    set({ user: null });
-
-    return { success: true };
-  } catch (error) {
-    const msg =
-      error?.response?.data?.message ||
-      error.message ||
-      "failed to delete account";
-
-    toast.error(msg);
-    return { success: false, error };
-  }
-},
-
+  confirmDeleteAccount: async (otp) => {
+    try {
+      await axiosInstance.post("/api/user/delete-account/confirm", { otp });
+      toast.success("Account deleted successfully");
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 500);
+      return { success: true };
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.message ||
+          error.message ||
+          "failed to delete account"
+      );
+      return { success: false };
+    }
+  },
 
   resendEmailOtp: async () => {
     try {
       await axiosInstance.post("/api/user/email/change/resend");
-      toast.success("otp resent to your email");
-    } catch (error) {
-      console.log(`error in resendEmailOtp ${error.message}`);
+      toast.success("OTP resent to your email");
+    } catch {
       toast.error("please try later");
     }
   },

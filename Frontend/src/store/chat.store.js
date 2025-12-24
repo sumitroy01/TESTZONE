@@ -1,12 +1,21 @@
 import { create } from "zustand";
 import { axiosInstance } from "../lib/axios";
 import toast from "react-hot-toast";
-// chatstore file top
-import { getSocket, markJoinedRoom, markLeftRoom } from "../socket.js"; // update path as needed
+import { getSocket, markJoinedRoom, markLeftRoom } from "../socket.js";
 
+/* ---------- helpers ---------- */
+
+const handleAuthError = (error) => {
+  if (error?.response?.status === 401) {
+    toast.error("Session expired. Please login again.");
+    return true; // auth error handled
+  }
+  return false;
+};
 
 const normalizeChat = (chat) => {
   if (!chat) return chat;
+
   const isGroupChat = chat.isGroupChat ?? !!chat.isGroup;
   const users = chat.users || chat.allUsers || [];
   const chatName =
@@ -22,6 +31,8 @@ const normalizeChat = (chat) => {
   };
 };
 
+/* ---------- store ---------- */
+
 const chatstore = create((set, get) => ({
   chats: [],
   selectedChat: null,
@@ -36,158 +47,127 @@ const chatstore = create((set, get) => ({
   page: 1,
   limit: 50,
   hasMore: true,
-  
+
+  /* ---------- selection + sockets ---------- */
+
   setSelectedChat: (chat) => {
-  const normalized = normalizeChat(chat);
-  const prev = get().selectedChat;
-  set({ selectedChat: normalized });
+    const normalized = normalizeChat(chat);
+    const prev = get().selectedChat;
 
-  try {
-    const socket = getSocket();
-    // leave previous room
-    if (socket && prev && prev._id) {
-      socket.emit("leave_room", prev._id);
-      markLeftRoom(prev._id);
+    set({ selectedChat: normalized });
+
+    try {
+      const socket = getSocket();
+
+      if (socket && prev?._id) {
+        socket.emit("leave_room", prev._id);
+        markLeftRoom(prev._id);
+      }
+
+      if (socket && normalized?._id) {
+        socket.emit("join_room", normalized._id);
+        markJoinedRoom(normalized._id);
+      }
+    } catch (err) {
+      console.warn("socket join/leave failed", err);
     }
+  },
 
-    // join new room
-    if (socket && normalized && normalized._id) {
-      socket.emit("join_room", normalized._id);
-      markJoinedRoom(normalized._id);
-    }
-  } catch (err) {
-    console.warn("setSelectedChat: socket join/leave failed", err);
-  }
-},
-
-
-
+  /* ---------- fetch chats ---------- */
 
   fetchChats: async (page, limit) => {
-    // set fetching immediately
     set({ isFetchingChats: true });
+
     try {
       const currentPage = page || get().page;
       const currentLimit = limit || get().limit;
 
       const res = await axiosInstance.get("/api/chat", {
-        params: {
-          page: currentPage,
-          limit: currentLimit,
-        },
-        // Accept 200 and 304 (so 304 ends up in `res`, not in `catch`)
+        params: { page: currentPage, limit: currentLimit },
         validateStatus: (status) => status === 200 || status === 304,
-        // optional while debugging server caching - remove in prod if you want
         headers: { "Cache-Control": "no-cache" },
       });
 
-      // If server returned 200, we got body; if 304, server says "no change"
       if (res.status === 200) {
-        const rawData = res.data?.data || [];
-        const data = rawData.map(normalizeChat);
+        const raw = res.data?.data || [];
+        const data = raw.map(normalizeChat);
 
-        const newPage = res.data?.page || currentPage;
-        const newLimit = res.data?.limit || currentLimit;
         const prevChats = currentPage === 1 ? [] : get().chats;
-        const merged = [...prevChats, ...data];
 
         set({
-          chats: merged,
-          page: newPage,
-          limit: newLimit,
-          hasMore: data.length === newLimit,
+          chats: [...prevChats, ...data],
+          page: res.data?.page || currentPage,
+          limit: res.data?.limit || currentLimit,
+          hasMore: data.length === currentLimit,
         });
-      } else if (res.status === 304) {
-        // No change on server. Important: do NOT throw — treat as successful no-op.
-        // But update pagination flags so the UI doesn't keep retrying blindly.
-        // Keep existing chats in store.
-        const newPage = res.data?.page || currentPage;
-        const newLimit = res.data?.limit || currentLimit;
+      }
 
-        // Optionally: if page === 1 and we have zero chats client-side,
-        // you might want to treat it as "no chats" (empty array).
-        // Here we keep existing chats (likely empty) and update hasMore conservatively:
-        set({
-          page: newPage,
-          limit: newLimit,
-          // If server says no-change, assume no more pages for safety.
-          // Adjust if your server provides better meta on 304 responses.
-          hasMore: false,
-        });
-
-        // debug
-        console.debug("fetchChats: 304 Not Modified - no changes applied");
+      if (res.status === 304) {
+        set({ hasMore: false });
       }
     } catch (error) {
-      console.log("error in fetchChats:", error?.response?.data || error);
+      if (handleAuthError(error)) return;
       toast.error(error?.response?.data?.message || "failed to load chats");
     } finally {
-      // ALWAYS clear the fetching flag
       set({ isFetchingChats: false });
     }
   },
 
+  /* ---------- access chat ---------- */
+
   accessChat: async (userId) => {
     set({ isAccessingChat: true });
+
     try {
       const res = await axiosInstance.post("/api/chat/access", { userId });
-
       const chat = normalizeChat(res.data);
+
       const chats = get().chats || [];
       const exists = chats.find((c) => c._id === chat._id);
 
-      const updatedChats = exists
-        ? chats.map((c) => (c._id === chat._id ? chat : c))
-        : [chat, ...chats];
-
       set({
-        chats: updatedChats,
+        chats: exists
+          ? chats.map((c) => (c._id === chat._id ? chat : c))
+          : [chat, ...chats],
         selectedChat: chat,
       });
     } catch (error) {
-      console.log("error in accessChat:", error?.response?.data || error);
+      if (handleAuthError(error)) return;
       toast.error(error?.response?.data?.message || "failed to access chat");
     } finally {
       set({ isAccessingChat: false });
     }
   },
 
+  /* ---------- group ---------- */
+
   createGroupChat: async ({ name, users, groupAvatar }) => {
     set({ isCreatingGroup: true });
+
     try {
       let res;
 
       if (groupAvatar instanceof File) {
-        const formData = new FormData();
-        formData.append("name", name);
-        users.forEach((id) => formData.append("users", id));
-        formData.append("groupAvatar", groupAvatar);
+        const fd = new FormData();
+        fd.append("name", name);
+        users.forEach((id) => fd.append("users", id));
+        fd.append("groupAvatar", groupAvatar);
 
-        res = await axiosInstance.post("/api/chat/group", formData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        });
+        res = await axiosInstance.post("/api/chat/group", fd);
       } else {
-        const payload = { name, users };
-        if (groupAvatar) {
-          payload.groupAvatar = groupAvatar;
-        }
-
-        res = await axiosInstance.post("/api/chat/group", payload);
+        res = await axiosInstance.post("/api/chat/group", {
+          name,
+          users,
+          groupAvatar,
+        });
       }
 
-      const newChat = normalizeChat(res.data);
-      const chats = get().chats || [];
+      const chat = normalizeChat(res.data);
+      set({ chats: [chat, ...get().chats], selectedChat: chat });
 
-      set({
-        chats: [newChat, ...chats],
-        selectedChat: newChat,
-      });
-
-      toast.success("group created sucessfully");
+      toast.success("group created successfully");
     } catch (error) {
-      console.log("error in createGroupChat:", error?.response?.data || error);
+      if (handleAuthError(error)) return;
       toast.error(error?.response?.data?.message || "failed to create group");
     } finally {
       set({ isCreatingGroup: false });
@@ -196,52 +176,29 @@ const chatstore = create((set, get) => ({
 
   renameGroup: async ({ chatId, name, groupAvatar }) => {
     set({ isRenamingGroup: true });
+
     try {
-      let res;
-
-      if (groupAvatar instanceof File) {
-        const formData = new FormData();
-        formData.append("chatId", chatId);
-        if (name) {
-          formData.append("name", name);
-        }
-        formData.append("groupAvatar", groupAvatar);
-
-        res = await axiosInstance.put("/api/chat/rename", formData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        });
-      } else {
-        const payload = { chatId, name };
-        if (groupAvatar) {
-          payload.groupAvatar = groupAvatar;
-        }
-
-        res = await axiosInstance.put("/api/chat/rename", payload);
-      }
-
-      const updatedChat = normalizeChat(res.data);
-      const chats = get().chats || [];
-      const selectedChat = get().selectedChat;
-
-      const updatedChats = chats.map((c) =>
-        c._id === updatedChat._id ? updatedChat : c
-      );
-
-      const newSelected =
-        selectedChat && selectedChat._id === updatedChat._id
-          ? updatedChat
-          : selectedChat;
-
-      set({
-        chats: updatedChats,
-        selectedChat: newSelected,
+      const res = await axiosInstance.put("/api/chat/rename", {
+        chatId,
+        name,
+        groupAvatar,
       });
 
-      toast.success("group renamed sucessfully");
+      const updated = normalizeChat(res.data);
+
+      set({
+        chats: get().chats.map((c) =>
+          c._id === updated._id ? updated : c
+        ),
+        selectedChat:
+          get().selectedChat?._id === updated._id
+            ? updated
+            : get().selectedChat,
+      });
+
+      toast.success("group renamed successfully");
     } catch (error) {
-      console.log("error in renameGroup:", error?.response?.data || error);
+      if (handleAuthError(error)) return;
       toast.error(error?.response?.data?.message || "failed to rename group");
     } finally {
       set({ isRenamingGroup: false });
@@ -250,33 +207,28 @@ const chatstore = create((set, get) => ({
 
   addToGroup: async ({ chatId, userId }) => {
     set({ isUpdatingGroup: true });
+
     try {
       const res = await axiosInstance.put("/api/chat/add", {
         chatId,
         userId,
       });
 
-      const updatedChat = normalizeChat(res.data);
-      const chats = get().chats || [];
-      const selectedChat = get().selectedChat;
-
-      const updatedChats = chats.map((c) =>
-        c._id === updatedChat._id ? updatedChat : c
-      );
-
-      const newSelected =
-        selectedChat && selectedChat._id === updatedChat._id
-          ? updatedChat
-          : selectedChat;
+      const updated = normalizeChat(res.data);
 
       set({
-        chats: updatedChats,
-        selectedChat: newSelected,
+        chats: get().chats.map((c) =>
+          c._id === updated._id ? updated : c
+        ),
+        selectedChat:
+          get().selectedChat?._id === updated._id
+            ? updated
+            : get().selectedChat,
       });
 
       toast.success("user added to group");
     } catch (error) {
-      console.log("error in addToGroup:", error?.response?.data || error);
+      if (handleAuthError(error)) return;
       toast.error(error?.response?.data?.message || "failed to add user");
     } finally {
       set({ isUpdatingGroup: false });
@@ -285,6 +237,7 @@ const chatstore = create((set, get) => ({
 
   removeFromGroup: async ({ chatId, userId }) => {
     set({ isUpdatingGroup: true });
+
     try {
       const res = await axiosInstance.put("/api/chat/remove", {
         chatId,
@@ -292,38 +245,32 @@ const chatstore = create((set, get) => ({
       });
 
       const data = res.data;
-      const chats = get().chats || [];
-      const selectedChat = get().selectedChat;
 
-      if (data && data._id) {
-        const updatedChat = normalizeChat(data);
-        const updatedChats = chats.map((c) =>
-          c._id === updatedChat._id ? updatedChat : c
-        );
-
-        const newSelected =
-          selectedChat && selectedChat._id === updatedChat._id
-            ? updatedChat
-            : selectedChat;
+      if (data?._id) {
+        const updated = normalizeChat(data);
 
         set({
-          chats: updatedChats,
-          selectedChat: newSelected,
+          chats: get().chats.map((c) =>
+            c._id === updated._id ? updated : c
+          ),
+          selectedChat:
+            get().selectedChat?._id === updated._id
+              ? updated
+              : get().selectedChat,
         });
       } else {
-        const filtered = chats.filter((c) => c._id !== chatId);
-        const newSelected =
-          selectedChat && selectedChat._id === chatId ? null : selectedChat;
-
         set({
-          chats: filtered,
-          selectedChat: newSelected,
+          chats: get().chats.filter((c) => c._id !== chatId),
+          selectedChat:
+            get().selectedChat?._id === chatId
+              ? null
+              : get().selectedChat,
         });
       }
 
       toast.success("user removed from group");
     } catch (error) {
-      console.log("error in removeFromGroup:", error?.response?.data || error);
+      if (handleAuthError(error)) return;
       toast.error(error?.response?.data?.message || "failed to remove user");
     } finally {
       set({ isUpdatingGroup: false });
@@ -333,24 +280,21 @@ const chatstore = create((set, get) => ({
   deleteChat: async (chatId) => {
     if (!chatId) return;
     set({ isDeletingChat: true });
+
     try {
       await axiosInstance.delete(`/api/chat/${chatId}`);
 
-      const chats = get().chats || [];
-      const selectedChat = get().selectedChat;
-
-      const filtered = chats.filter((c) => c._id !== chatId);
-      const newSelected =
-        selectedChat && selectedChat._id === chatId ? null : selectedChat;
-
       set({
-        chats: filtered,
-        selectedChat: newSelected,
+        chats: get().chats.filter((c) => c._id !== chatId),
+        selectedChat:
+          get().selectedChat?._id === chatId
+            ? null
+            : get().selectedChat,
       });
 
       toast.success("chat deleted");
     } catch (error) {
-      console.log("error in deleteChat:", error?.response?.data || error);
+      if (handleAuthError(error)) return;
       toast.error(error?.response?.data?.message || "failed to delete chat");
     } finally {
       set({ isDeletingChat: false });

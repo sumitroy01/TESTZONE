@@ -225,16 +225,11 @@ export const verifyUser = async (req, res) => {
       return res.status(400).json({ message: "invalid user" });
     }
 
-    if (email) {
-      email = email.trim().toLowerCase();
-    }
+    if (email) email = email.trim().toLowerCase();
 
-    let myCurrentUser;
-    if (userId) {
-      myCurrentUser = await Users.findById(userId).select("+otp +otpExpires");
-    } else if (email) {
-      myCurrentUser = await Users.findOne({ email }).select("+otp +otpExpires");
-    }
+    const myCurrentUser = userId
+      ? await Users.findById(userId).select("+otp +otpExpires")
+      : await Users.findOne({ email }).select("+otp +otpExpires");
 
     if (!myCurrentUser) {
       return res.status(404).json({ message: "user not found" });
@@ -249,16 +244,17 @@ export const verifyUser = async (req, res) => {
       !myCurrentUser.otpExpires ||
       Date.now() > new Date(myCurrentUser.otpExpires).getTime()
     ) {
-      // otp expired for unverified user → delete and force re-signup
-      if (!myCurrentUser.isVerified) {
-        await Users.deleteOne({ _id: myCurrentUser._id });
-      }
+      await Users.deleteOne({ _id: myCurrentUser._id });
       return res
         .status(422)
         .json({ message: "otp expired, please sign up again" });
     }
 
-    const otpMatch = await bcrypt.compare(otp.toString(), myCurrentUser.otp);
+    const otpMatch = await bcrypt.compare(
+      otp.toString(),
+      myCurrentUser.otp
+    );
+
     if (!otpMatch) {
       return res.status(422).json({ message: "invalid otp" });
     }
@@ -268,6 +264,7 @@ export const verifyUser = async (req, res) => {
     myCurrentUser.otpExpires = undefined;
     await myCurrentUser.save();
 
+    // 🔑 COOKIE SET HERE (fixed via generateToken)
     const token = generateToken(myCurrentUser._id, res);
 
     return res.status(200).json({
@@ -288,6 +285,7 @@ export const verifyUser = async (req, res) => {
   }
 };
 
+
 export const logIn = async (req, res) => {
   try {
     let { identifier, password } = req.body;
@@ -296,28 +294,19 @@ export const logIn = async (req, res) => {
       return res.status(400).json({ message: "all fields are required" });
     }
 
-    // Normalize / trim input
     identifier = identifier.trim();
     const isEmail = identifier.includes("@");
 
-    let query = {};
+    const query = isEmail
+      ? { email: identifier.toLowerCase() }
+      : { userName: identifier };
 
-    if (isEmail) {
-      // emails are usually unique + case-insensitive
-      query = { email: identifier.toLowerCase() };
-    } else {
-      // username login
-      query = { userName: identifier };
-    }
-
-    // get user with password for login
     const myUser = await Users.findOne(query).select("+password");
 
     if (!myUser) {
       return res.status(404).json({ message: "user not found" });
     }
 
-    // block login if not verified
     if (!myUser.isVerified) {
       return res.status(403).json({
         message: "please verify your account before logging in",
@@ -332,6 +321,7 @@ export const logIn = async (req, res) => {
       return res.status(401).json({ message: "please check the password" });
     }
 
+    // 🔑 COOKIE SET HERE (fixed via generateToken)
     const token = generateToken(myUser._id, res);
 
     return res.status(200).json({
@@ -352,20 +342,19 @@ export const logIn = async (req, res) => {
   }
 };
 
+
 export const logOut = async (req, res) => {
   try {
-    // Make sure the options here match those used in generateToken when creating the cookie
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      path: "/",
-      // domain: process.env.COOKIE_DOMAIN || undefined, // enable if you set a domain when setting cookie
-    };
+    const isProd =
+      process.env.NODE_ENV === "production" &&
+      process.env.FORCE_HTTPS === "true";
 
-    // explicit clear with empty value + expires for extra reliability
-    res.cookie("jwt", "", { ...cookieOptions, maxAge: 0, expires: new Date(0) });
-    res.clearCookie("jwt", cookieOptions);
+    res.clearCookie("jwt", {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      path: "/",
+    });
 
     return res.status(200).json({ message: "logged out successfully" });
   } catch (error) {

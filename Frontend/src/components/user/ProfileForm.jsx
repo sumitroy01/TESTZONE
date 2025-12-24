@@ -2,39 +2,40 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 
 function ProfileForm({ effectiveUser, updateProfile, isUpdatingProfile }) {
-  const [name, setName] = useState(effectiveUser.name || "");
-  const [userName, setUserName] = useState(effectiveUser.userName || "");
-  const [avatarUrl, setAvatarUrl] = useState(effectiveUser.avatar || "");
+  // 🛡️ HARD GUARD — DO NOT RENDER UNTIL USER EXISTS
+  if (!effectiveUser) {
+    return null;
+  }
+
+  // ✅ SAFE INITIAL STATE
+  const [name, setName] = useState("");
+  const [userName, setUserName] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
   const [avatarFile, setAvatarFile] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
 
+  // 🔄 SYNC WHEN USER CHANGES
   useEffect(() => {
     setName(effectiveUser.name || "");
     setUserName(effectiveUser.userName || "");
     setAvatarUrl(effectiveUser.avatar || "");
     setAvatarFile(null);
-  }, [effectiveUser.name, effectiveUser.userName, effectiveUser.avatar]);
+  }, [effectiveUser]);
 
- const handleProfileSubmit = async (e) => {
-  e.preventDefault();
+  const handleProfileSubmit = async (e) => {
+    e.preventDefault();
 
-  const { success } = await updateProfile({
-    name,
-    userName,
-    avatar: avatarUrl,  
-    avatarFile,
-  });
+    const { success } = await updateProfile({
+      name,
+      userName,
+      avatar: avatarUrl,
+      avatarFile,
+    });
 
-  if (!success) {
-    
-    return;
-  }
+    if (!success) return;
 
-  
-  setIsEditMode(false);
-
-};
-
+    setIsEditMode(false);
+  };
 
   const handleAvatarFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -63,7 +64,9 @@ function ProfileForm({ effectiveUser, updateProfile, isUpdatingProfile }) {
         </div>
         <div className="flex items-center gap-2">
           {isUpdatingProfile && (
-            <span className="text-[11px] text-sky-300">Saving changes...</span>
+            <span className="text-[11px] text-sky-300">
+              Saving changes...
+            </span>
           )}
           {!isEditMode && (
             <button
@@ -79,7 +82,9 @@ function ProfileForm({ effectiveUser, updateProfile, isUpdatingProfile }) {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <label className="text-[11px] text-neutral-300">Display name</label>
+          <label className="text-[11px] text-neutral-300">
+            Display name
+          </label>
           <input
             type="text"
             className="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2 text-xs outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500/60 disabled:opacity-60"
@@ -110,8 +115,6 @@ function ProfileForm({ effectiveUser, updateProfile, isUpdatingProfile }) {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        
-
         <div className="mt-2 flex items-center gap-2">
           <input
             type="file"
@@ -134,9 +137,7 @@ function ProfileForm({ effectiveUser, updateProfile, isUpdatingProfile }) {
         )}
 
         <p className="text-[10px] text-neutral-500">
-          Paste an image URL or select a file from your system. The backend will
-          use <code className="text-[10px] bg-slate-800/80 px-1 rounded">req.file</code>{" "}
-          when a file is uploaded.
+          Paste an image URL or select a file from your system.
         </p>
       </div>
 
@@ -160,7 +161,7 @@ function ProfileForm({ effectiveUser, updateProfile, isUpdatingProfile }) {
             <button
               type="submit"
               disabled={isUpdatingProfile}
-              className="px-4 py-2 rounded-xl bg-white text-slate-950 text-xs font-medium hover:bg-neutral-100 disabled:opacity-60 disabled:cursor-not-allowed transition"
+              className="px-4 py-2 rounded-xl bg-white text-slate-950 text-xs font-medium hover:bg-neutral-100 disabled:opacity-60 transition"
             >
               {isUpdatingProfile ? "Saving..." : "Save profile"}
             </button>
