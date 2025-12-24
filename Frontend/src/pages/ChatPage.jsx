@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { useRef } from "react";
-
+import { useEffect, useMemo, useState, useRef } from "react";
 
 import authStore from "../store/auth.store.js";
 import chatstore from "../store/chat.store.js";
@@ -14,7 +12,6 @@ import EditGroupModal from "../components/chat/EditGroupModal.jsx";
 
 function ChatPage() {
   const { authUser } = authStore();
-  const initialAttemptRef = useRef(false);
 
   const {
     chats,
@@ -53,10 +50,9 @@ function ChatPage() {
   const [groupName, setGroupName] = useState("");
   const [searchUserName, setSearchUserName] = useState("");
   const [selectedUsers, setSelectedUsers] = useState([]);
-
   const [isEditingGroup, setIsEditingGroup] = useState(false);
 
-  // mobile: true = show sidebar, false = show chat window
+  // mobile
   const [showSidebarOnMobile, setShowSidebarOnMobile] = useState(true);
 
   const activeMessagesEntry = selectedChat
@@ -64,23 +60,56 @@ function ChatPage() {
     : null;
   const messages = activeMessagesEntry?.data || [];
 
- useEffect(() => {
-  if (chats.length === 0 && !isFetchingChats) {
-    fetchChats(1, limit);
-  }
-}, [chats.length, fetchChats, limit]);
-
-
-
+  // -------------------------------
+  // 1️⃣ Fetch chats
+  // -------------------------------
   useEffect(() => {
-    if (selectedChat && !messagesByChat[selectedChat._id]) {
-      fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
-      if (authUser?._id) {
-        markAsRead({ chatId: selectedChat._id, userId: authUser._id });
-      }
+    if (chats.length === 0 && !isFetchingChats) {
+      fetchChats(1, limit);
     }
-  }, [selectedChat, messagesByChat, fetchMessages, markAsRead, authUser]);
+  }, [chats.length, isFetchingChats, fetchChats, limit]);
 
+  // -------------------------------
+  // 2️⃣ Fetch messages when chat changes
+  // -------------------------------
+  useEffect(() => {
+    if (!selectedChat?._id) return;
+
+    if (!messagesByChat[selectedChat._id]) {
+      fetchMessages({
+        chatId: selectedChat._id,
+        page: 1,
+        limit: 50,
+      });
+    }
+  }, [selectedChat?._id, messagesByChat, fetchMessages]);
+
+  // -------------------------------
+  // 3️⃣ Mark messages as read + refetch (🔥 FIX)
+  // -------------------------------
+  useEffect(() => {
+    if (!selectedChat?._id || !authUser?._id) return;
+
+    const markAndRefresh = async () => {
+      await markAsRead({
+        chatId: selectedChat._id,
+        userId: authUser._id,
+      });
+
+      // force UI update with fresh readBy
+      await fetchMessages({
+        chatId: selectedChat._id,
+        page: 1,
+        limit: 50,
+      });
+    };
+
+    markAndRefresh();
+  }, [selectedChat?._id, authUser?._id, markAsRead, fetchMessages]);
+
+  // -------------------------------
+  // Sorted chats
+  // -------------------------------
   const sortedChats = useMemo(() => {
     return [...chats].sort((a, b) => {
       const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
@@ -89,9 +118,12 @@ function ChatPage() {
     });
   }, [chats]);
 
+  // -------------------------------
+  // Handlers
+  // -------------------------------
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
-    setShowSidebarOnMobile(false); // go to messages on mobile
+    setShowSidebarOnMobile(false);
   };
 
   const handleLoadMoreChats = () => {
@@ -104,23 +136,24 @@ function ChatPage() {
     if (payload?.content && typeof payload.content === "string") {
       if (!payload.content.trim()) return;
     }
-
-    await messageStore.getState().sendMessage(payload);
+    await sendMessage(payload);
   };
 
   const toggleUserInGroup = (user) => {
     const exists = selectedUsers.find((u) => u._id === user._id);
-    if (exists) {
-      setSelectedUsers((prev) => prev.filter((u) => u._id !== user._id));
-    } else {
-      setSelectedUsers((prev) => [...prev, user]);
-    }
+    setSelectedUsers((prev) =>
+      exists ? prev.filter((u) => u._id !== user._id) : [...prev, user]
+    );
   };
 
   const handleCreateGroup = async ({ groupAvatar }) => {
     if (!groupName.trim() || selectedUsers.length === 0) return;
-    const users = selectedUsers.map((u) => u._id);
-    await createGroupChat({ name: groupName.trim(), users, groupAvatar });
+
+    await createGroupChat({
+      name: groupName.trim(),
+      users: selectedUsers.map((u) => u._id),
+      groupAvatar,
+    });
 
     setIsCreatingGroup(false);
     setGroupName("");
@@ -131,29 +164,24 @@ function ChatPage() {
   const handleSelectChatFromUser = (user) => {
     if (!user) return;
 
-    const existing = chats.find((chat) => {
-      if (chat.isGroupChat || chat.isGroup) return false;
-      const other = (chat.users || []).find((u) => u._id === user._id);
-      return !!other;
-    });
+    const existing = chats.find(
+      (chat) =>
+        !chat.isGroupChat &&
+        (chat.users || []).some((u) => u._id === user._id)
+    );
 
     if (existing) {
       setSelectedChat(existing);
-      setShowSidebarOnMobile(false);
-    } else if (accessChat) {
-      accessChat(user._id);
-      setShowSidebarOnMobile(false);
     } else {
-      setSelectedChat(null);
+      accessChat(user._id);
     }
+
+    setShowSidebarOnMobile(false);
   };
 
   const handleOpenEditGroup = (chat) => {
     const target = chat || selectedChat;
-    if (!target) return;
-
-    const isGroup = target.isGroupChat || target.isGroup;
-    if (!isGroup) return;
+    if (!target?.isGroupChat) return;
 
     setSelectedChat(target);
     setIsEditingGroup(true);
@@ -172,40 +200,16 @@ function ChatPage() {
     }
   };
 
+  // -------------------------------
+  // Render
+  // -------------------------------
   return (
     <div className="h-[calc(100vh-5rem)] w-full max-w-6xl mx-auto rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden flex flex-col shadow-2xl shadow-black/40">
-      {/* Mobile top bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 md:hidden">
-        <button
-          onClick={() => setShowSidebarOnMobile((prev) => !prev)}
-          className="p-2 rounded-xl hover:bg-white/10 active:scale-95 transition"
-        >
-          <span className="sr-only">Toggle chat list</span>
-          <div className="space-y-1">
-            <span className="block w-5 h-0.5 bg-white" />
-            <span className="block w-5 h-0.5 bg-white" />
-            <span className="block w-5 h-0.5 bg-white" />
-          </div>
-        </button>
-
-        <div className="text-xs font-medium text-white/80 truncate max-w-[60%]">
-          {showSidebarOnMobile
-            ? "Chats"
-            : selectedChat?.chatName ||
-              selectedChat?.groupName ||
-              "Messages"}
-        </div>
-
-        <div className="w-8" />
-      </div>
-
-      {/* Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
         <div
           className={`${
             showSidebarOnMobile ? "flex" : "hidden"
-          } md:flex w-full md:w-72 h-full`}
+          } md:flex w-full md:w-72`}
         >
           <ChatSidebar
             chats={sortedChats}
@@ -227,11 +231,10 @@ function ChatPage() {
           />
         </div>
 
-        {/* Chat window */}
         <div
           className={`${
             showSidebarOnMobile ? "hidden" : "flex"
-          } md:flex flex-1 h-full`}
+          } md:flex flex-1`}
         >
           <ChatWindow
             selectedChat={selectedChat}
