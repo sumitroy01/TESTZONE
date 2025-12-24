@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Toaster } from "react-hot-toast";
 import { motion, AnimatePresence } from "framer-motion";
 
 import authStore from "./store/auth.store.js";
@@ -51,55 +50,53 @@ function App() {
   const [authMode, setAuthMode] = useState("login");
   const [activeView, setActiveView] = useState("chat");
 
-  /* ---- BOOT: check auth once ---- */
+  /* ---------- boot: check auth once ---------- */
   useEffect(() => {
     checkAuth();
 
     return () => {
-      try {
-        const s = getSocket();
-        if (s?.disconnect) s.disconnect();
-      } catch {}
+      const s = getSocket();
+      if (s?.connected) s.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---- AUTH CHANGE EFFECT ---- */
+  /* ---------- auth change handler ---------- */
   useEffect(() => {
-    if (authUser) {
-      // fetch chats
-      const { fetchChats, page, limit } = chatstore.getState();
-      if (typeof fetchChats === "function") {
-        fetchChats(page || 1, limit || 50).catch(() => {});
-      }
-
-      setShowAuth(false);
-      setActiveView("chat");
-
-      // init socket
-      try {
-        const backend =
-          import.meta.env.VITE_BACKEND_URL || window.location.origin;
-        initSocket(backend);
-
-        setTimeout(() => {
-          try {
-            registerSocketListeners();
-          } catch {}
-        }, 50);
-      } catch {}
-    } else {
+    if (!authUser) {
       // logout cleanup
-      try {
-        const s = getSocket();
-        if (s?.disconnect) s.disconnect();
-      } catch {}
+      const s = getSocket();
+      if (s?.connected) s.disconnect();
 
       setActiveView("chat");
+      return;
+    }
+
+    // fetch chats
+    const { fetchChats, page, limit } = chatstore.getState();
+    if (typeof fetchChats === "function") {
+      fetchChats(page || 1, limit || 50).catch(() => {});
+    }
+
+    setShowAuth(false);
+    setActiveView("chat");
+
+    // init socket
+    try {
+      const backend =
+        import.meta.env.VITE_BACKEND_URL || window.location.origin;
+
+      initSocket(backend);
+
+      // register socket listeners ONCE per app lifetime
+      registerSocketListeners();
+    } catch (err) {
+      console.error("socket init failed", err);
     }
   }, [authUser]);
 
-  /* ---- UI helpers ---- */
+  /* ---------- UI helpers ---------- */
+
   const openAuth = (mode) => {
     setAuthMode(mode);
     setShowAuth(true);
@@ -109,18 +106,16 @@ function App() {
     setShowAuth(false);
   };
 
-  /* ---- LOADING ---- */
+  /* ---------- loading ---------- */
+
   if (isCheckingAuth) {
-    return (
-      <>
-        <FullScreenLoader />
-      </>
-    );
+    return <FullScreenLoader />;
   }
 
-  const isLoggedIn = !!authUser;
+  const isLoggedIn = Boolean(authUser);
 
-  /* ---- RENDER ---- */
+  /* ---------- render ---------- */
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
       <Navbar
@@ -178,8 +173,6 @@ function App() {
           )}
         </AnimatePresence>
       </main>
-
-      {/* <Toaster position="top-right" /> */}
     </div>
   );
 }

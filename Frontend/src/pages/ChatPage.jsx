@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { useRef } from "react";
-
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import authStore from "../store/auth.store.js";
 import chatstore from "../store/chat.store.js";
@@ -12,10 +10,16 @@ import ChatWindow from "../components/chat/ChatWindow.jsx";
 import CreateGroupModal from "../components/chat/CreateGroupModal.jsx";
 import EditGroupModal from "../components/chat/EditGroupModal.jsx";
 
+import { getSocket, markJoinedRoom, markLeftRoom } from "../socket.js";
+
 function ChatPage() {
   const { authUser } = authStore();
-  const initialAttemptRef = useRef(false);
 
+  /* ---------- refs ---------- */
+  const prevChatIdRef = useRef(null);
+  const readMarkedRef = useRef(new Set()); // 🔥 prevents read loops
+
+  /* ---------- stores ---------- */
   const {
     chats,
     selectedChat,
@@ -49,43 +53,70 @@ function ChatPage() {
   const userFound = userstore((state) => state.userFound);
   const isSearchingUser = userstore((state) => state.isSearchingUser);
 
+  /* ---------- local UI state ---------- */
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [searchUserName, setSearchUserName] = useState("");
   const [selectedUsers, setSelectedUsers] = useState([]);
-
   const [isEditingGroup, setIsEditingGroup] = useState(false);
-
-  // mobile: true = show sidebar, false = show chat window
   const [showSidebarOnMobile, setShowSidebarOnMobile] = useState(true);
 
+  /* ---------- derived ---------- */
   const activeMessagesEntry = selectedChat
     ? messagesByChat[selectedChat._id]
     : null;
+
   const messages = activeMessagesEntry?.data || [];
 
-  // useEffect(() => {
-  //   if (!chats.length && !isFetchingChats) {
-  //     fetchChats(1, limit);
-  //   }
-  // }, [chats, isFetchingChats, fetchChats, limit]);
- useEffect(() => {
-  if (chats.length === 0 && !isFetchingChats) {
-    fetchChats(1, limit);
-  }
-}, [chats.length, fetchChats, limit]);
-
-
-
+  /* ---------- initial chat fetch ---------- */
+  
+  /* ---------- chat open / switch (CRITICAL LOGIC) ---------- */
   useEffect(() => {
-    if (selectedChat && !messagesByChat[selectedChat._id]) {
-      fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
-      if (authUser?._id) {
-        markAsRead({ chatId: selectedChat._id, userId: authUser._id });
-      }
-    }
-  }, [selectedChat, messagesByChat, fetchMessages, markAsRead, authUser]);
+    if (!selectedChat || !authUser?._id) return;
 
+    const socket = getSocket();
+    const chatId = String(selectedChat._id);
+
+    /* leave previous room */
+    if (prevChatIdRef.current && prevChatIdRef.current !== chatId) {
+      socket?.emit("leave_room", prevChatIdRef.current);
+      markLeftRoom(prevChatIdRef.current);
+    }
+
+    /* join new room */
+    socket?.emit("join_room", chatId);
+    markJoinedRoom(chatId);
+    prevChatIdRef.current = chatId;
+
+    /* fetch messages once */
+    if (!messagesByChat[chatId]) {
+      fetchMessages({ chatId, page: 1, limit: 50 });
+    }
+
+    /* ✅ mark read ONLY ONCE PER CHAT */
+    if (!readMarkedRef.current.has(chatId)) {
+      markAsRead({
+        chatId,
+        userId: authUser._id,
+        silent: true,
+      });
+
+      readMarkedRef.current.add(chatId);
+    }
+  }, [selectedChat, authUser, fetchMessages, markAsRead]);
+
+  /* ---------- cleanup on unmount ---------- */
+  useEffect(() => {
+    return () => {
+      readMarkedRef.current.clear();
+      const socket = getSocket();
+      if (prevChatIdRef.current) {
+        socket?.emit("leave_room", prevChatIdRef.current);
+      }
+    };
+  }, []);
+
+  /* ---------- sort chats ---------- */
   const sortedChats = useMemo(() => {
     return [...chats].sort((a, b) => {
       const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
@@ -94,9 +125,29 @@ function ChatPage() {
     });
   }, [chats]);
 
+  /* ---------- handlers ---------- */
+
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
-    setShowSidebarOnMobile(false); // go to messages on mobile
+    setShowSidebarOnMobile(false);
+  };
+
+  const handleSelectChatFromUser = (user) => {
+    if (!user) return;
+
+    const existing = chats.find((chat) => {
+      if (chat.isGroupChat || chat.isGroup) return false;
+      const users = chat.users || chat.allUsers || [];
+      return users.some((u) => u._id === user._id);
+    });
+
+    if (existing) {
+      setSelectedChat(existing);
+    } else if (accessChat) {
+      accessChat(user._id);
+    }
+
+    setShowSidebarOnMobile(false);
   };
 
   const handleLoadMoreChats = () => {
@@ -109,48 +160,30 @@ function ChatPage() {
     if (payload?.content && typeof payload.content === "string") {
       if (!payload.content.trim()) return;
     }
-
-    await messageStore.getState().sendMessage(payload);
+    await sendMessage(payload);
   };
 
   const toggleUserInGroup = (user) => {
-    const exists = selectedUsers.find((u) => u._id === user._id);
-    if (exists) {
-      setSelectedUsers((prev) => prev.filter((u) => u._id !== user._id));
-    } else {
-      setSelectedUsers((prev) => [...prev, user]);
-    }
+    setSelectedUsers((prev) =>
+      prev.some((u) => u._id === user._id)
+        ? prev.filter((u) => u._id !== user._id)
+        : [...prev, user]
+    );
   };
 
   const handleCreateGroup = async ({ groupAvatar }) => {
     if (!groupName.trim() || selectedUsers.length === 0) return;
-    const users = selectedUsers.map((u) => u._id);
-    await createGroupChat({ name: groupName.trim(), users, groupAvatar });
+
+    await createGroupChat({
+      name: groupName.trim(),
+      users: selectedUsers.map((u) => u._id),
+      groupAvatar,
+    });
 
     setIsCreatingGroup(false);
     setGroupName("");
     setSearchUserName("");
     setSelectedUsers([]);
-  };
-
-  const handleSelectChatFromUser = (user) => {
-    if (!user) return;
-
-    const existing = chats.find((chat) => {
-      if (chat.isGroupChat || chat.isGroup) return false;
-      const other = (chat.users || []).find((u) => u._id === user._id);
-      return !!other;
-    });
-
-    if (existing) {
-      setSelectedChat(existing);
-      setShowSidebarOnMobile(false);
-    } else if (accessChat) {
-      accessChat(user._id);
-      setShowSidebarOnMobile(false);
-    } else {
-      setSelectedChat(null);
-    }
   };
 
   const handleOpenEditGroup = (chat) => {
@@ -170,47 +203,18 @@ function ChatPage() {
     if (!target?._id) return;
 
     deleteChat(target._id);
-
-    if (selectedChat?._id === target._id) {
-      setSelectedChat(null);
-      setShowSidebarOnMobile(true);
-    }
+    setSelectedChat(null);
+    setShowSidebarOnMobile(true);
   };
+
+  /* ---------- UI ---------- */
 
   return (
     <div className="h-[calc(100vh-5rem)] w-full max-w-6xl mx-auto rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden flex flex-col shadow-2xl shadow-black/40">
-      {/* Mobile top bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 md:hidden">
-        <button
-          onClick={() => setShowSidebarOnMobile((prev) => !prev)}
-          className="p-2 rounded-xl hover:bg-white/10 active:scale-95 transition"
-        >
-          <span className="sr-only">Toggle chat list</span>
-          <div className="space-y-1">
-            <span className="block w-5 h-0.5 bg-white" />
-            <span className="block w-5 h-0.5 bg-white" />
-            <span className="block w-5 h-0.5 bg-white" />
-          </div>
-        </button>
-
-        <div className="text-xs font-medium text-white/80 truncate max-w-[60%]">
-          {showSidebarOnMobile
-            ? "Chats"
-            : selectedChat?.chatName ||
-              selectedChat?.groupName ||
-              "Messages"}
-        </div>
-
-        <div className="w-8" />
-      </div>
-
-      {/* Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
         <div
-          className={`${
-            showSidebarOnMobile ? "flex" : "hidden"
-          } md:flex w-full md:w-72 h-full`}
+          className={`${showSidebarOnMobile ? "flex" : "hidden"} md:flex w-full md:w-72`}
         >
           <ChatSidebar
             chats={sortedChats}
@@ -234,9 +238,7 @@ function ChatPage() {
 
         {/* Chat window */}
         <div
-          className={`${
-            showSidebarOnMobile ? "hidden" : "flex"
-          } md:flex flex-1 h-full`}
+          className={`${showSidebarOnMobile ? "hidden" : "flex"} md:flex flex-1`}
         >
           <ChatWindow
             selectedChat={selectedChat}
@@ -273,11 +275,6 @@ function ChatPage() {
           onClose={() => setIsEditingGroup(false)}
           chat={selectedChat}
           authUserId={authUser?._id}
-          searchUserName={searchUserName}
-          setSearchUserName={setSearchUserName}
-          userFound={userFound}
-          isSearchingUser={isSearchingUser}
-          findUser={findUser}
           renameGroup={renameGroup}
           addToGroup={addToGroup}
           removeFromGroup={removeFromGroup}

@@ -1,4 +1,3 @@
-// src/store/message.store.js
 import { create } from "zustand";
 import { axiosInstance } from "../lib/axios";
 import toast from "react-hot-toast";
@@ -64,9 +63,7 @@ const messageStore = create((set, get) => ({
       return { success: true };
     } catch (error) {
       if (handleAuthError(error)) return { success: false };
-      toast.error(
-        error?.response?.data?.message || "could not fetch messages"
-      );
+      toast.error(error?.response?.data?.message || "could not fetch messages");
       return { success: false };
     } finally {
       set({ isFetchingMessages: false });
@@ -127,37 +124,38 @@ const messageStore = create((set, get) => ({
       return { success: true };
     } catch (error) {
       if (handleAuthError(error)) return { success: false };
-      toast.error(
-        error?.response?.data?.message || "could not send message"
-      );
+      toast.error(error?.response?.data?.message || "could not send message");
       return { success: false };
     } finally {
       set({ isSendingMessage: false });
     }
   },
 
-  /* ---------- mark as read ---------- */
+  /* ---------- mark as read (REST) ---------- */
 
-  markAsRead: async ({ chatId, messageId, userId, silent = false }) => {
+  markAsRead: async ({ chatId, messageId, userId, silent = true }) => {
     if (!chatId && !messageId) return { success: false };
 
     set({ isMarkingRead: true });
     try {
-      await axiosInstance.put("/api/message/read", {
-        chatId,
-        messageId,
-      });
+      await axiosInstance.put("/api/message/read", { chatId, messageId });
 
+      // optimistic local update
       set((state) => {
         const updated = { ...state.messagesByChat };
 
         Object.values(updated).forEach((entry) => {
           if (!entry?.data) return;
-          entry.data = entry.data.map((msg) =>
-            String(msg._id) === String(messageId) && userId
-              ? { ...msg, readBy: [...(msg.readBy || []), userId] }
-              : msg
-          );
+
+          entry.data = entry.data.map((msg) => {
+            if (messageId && String(msg._id) !== String(messageId)) return msg;
+            if ((msg.readBy || []).includes(userId)) return msg;
+
+            return {
+              ...msg,
+              readBy: [...(msg.readBy || []), userId],
+            };
+          });
         });
 
         return { messagesByChat: updated };
@@ -205,31 +203,6 @@ const messageStore = create((set, get) => ({
     }
   },
 
-  /* ---------- delete chat ---------- */
-
-  deleteChat: async (chatId) => {
-    if (!chatId) return { success: false };
-
-    set({ isDeletingChat: true });
-    try {
-      await axiosInstance.delete(`/api/message/chat/${chatId}`);
-      set((state) => {
-        const updated = { ...state.messagesByChat };
-        delete updated[chatId];
-        return { messagesByChat: updated };
-      });
-
-      toast.success("chat deleted");
-      return { success: true };
-    } catch (error) {
-      if (handleAuthError(error)) return { success: false };
-      toast.error("could not delete chat");
-      return { success: false };
-    } finally {
-      set({ isDeletingChat: false });
-    }
-  },
-
   /* ---------- socket helpers ---------- */
 
   addIncomingMessage: (chatId, incomingMessage) => {
@@ -263,6 +236,34 @@ const messageStore = create((set, get) => ({
         messagesByChat: {
           ...state.messagesByChat,
           [chatId]: { ...existing, data: sortMessagesAsc(updated) },
+        },
+      };
+    });
+  },
+
+  /* ---------- SOCKET: messages_read ---------- */
+
+  applyMessagesRead: ({ chatId, by, messageId }) => {
+    if (!chatId || !by) return;
+
+    set((state) => {
+      const entry = state.messagesByChat[chatId];
+      if (!entry?.data) return state;
+
+      const updated = entry.data.map((msg) => {
+        if (messageId && String(msg._id) !== String(messageId)) return msg;
+        if ((msg.readBy || []).includes(by)) return msg;
+
+        return {
+          ...msg,
+          readBy: [...(msg.readBy || []), by],
+        };
+      });
+
+      return {
+        messagesByChat: {
+          ...state.messagesByChat,
+          [chatId]: { ...entry, data: updated },
         },
       };
     });

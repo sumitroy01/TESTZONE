@@ -136,15 +136,39 @@ export const sendMessage = async (req, res) => {
 };
 
 // PUT /api/message/read
+// export const markMessagesRead = async (req, res) => {
+//   try {
+//     const { chatId, messageId } = req.body;
+//     const userId = req.user._id;
+
+//     if (!chatId && !messageId) {
+//       return res
+//         .status(400)
+//         .json({ message: "chatId or messageId is required" });
+//     }
+
+//     const filter = messageId ? { _id: messageId } : { chat: chatId };
+
+//     await Messages.updateMany(filter, {
+//       $addToSet: { readBy: userId },
+//     });
+
+//     return res.status(200).json({ message: "Marked as read" });
+//   } catch (err) {
+//     console.error("error in markMessagesRead:", err);
+//     return res
+//       .status(500)
+//       .json({ message: "Server error", error: err.message });
+//   }
+// };
+// PUT /api/message/read
 export const markMessagesRead = async (req, res) => {
   try {
     const { chatId, messageId } = req.body;
     const userId = req.user._id;
 
     if (!chatId && !messageId) {
-      return res
-        .status(400)
-        .json({ message: "chatId or messageId is required" });
+      return res.status(400).json({ message: "chatId or messageId is required" });
     }
 
     const filter = messageId ? { _id: messageId } : { chat: chatId };
@@ -153,14 +177,23 @@ export const markMessagesRead = async (req, res) => {
       $addToSet: { readBy: userId },
     });
 
+    // ✅ IMPORTANT: notify sender(s)
+    if (chatId) {
+      emitToRoom(chatId, "messages_read", {
+        chatId,
+        by: String(userId),
+        messageId: messageId || null,
+      });
+    }
+
     return res.status(200).json({ message: "Marked as read" });
   } catch (err) {
     console.error("error in markMessagesRead:", err);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
+    return res.status(500).json({ message: "Server error" });
   }
 };
+
+
 
 // DELETE /api/message/:messageId
 export const deleteMessage = async (req, res) => {
