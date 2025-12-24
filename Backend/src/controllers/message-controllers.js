@@ -168,7 +168,7 @@ export const markMessagesRead = async (req, res) => {
     const userId = req.user._id;
 
     if (!chatId && !messageId) {
-      return res.status(400).json({ message: "chatId or messageId is required" });
+      return res.status(400).json({ message: "chatId or messageId required" });
     }
 
     const filter = messageId ? { _id: messageId } : { chat: chatId };
@@ -177,7 +177,7 @@ export const markMessagesRead = async (req, res) => {
       $addToSet: { readBy: userId },
     });
 
-    // ✅ IMPORTANT: notify sender(s)
+  
     if (chatId) {
       emitToRoom(chatId, "messages_read", {
         chatId,
@@ -188,10 +188,11 @@ export const markMessagesRead = async (req, res) => {
 
     return res.status(200).json({ message: "Marked as read" });
   } catch (err) {
-    console.error("error in markMessagesRead:", err);
+    console.error("markMessagesRead error:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };
+
 
 
 

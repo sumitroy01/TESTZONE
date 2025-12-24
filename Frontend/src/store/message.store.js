@@ -301,6 +301,44 @@ markAsRead: async ({ chatId, userId, silent = true }) => {
   clearAllMessages: () => {
     set({ messagesByChat: {} });
   },
+
+
+  applyMessagesRead: ({ chatId, by, messageId }) => {
+  if (!chatId || !by) return;
+
+  set((state) => {
+    const entry = state.messagesByChat[chatId];
+    if (!entry?.data) return state;
+
+    const updatedMessages = entry.data.map((msg) => {
+      // if specific message
+      if (messageId && String(msg._id) !== String(messageId)) {
+        return msg;
+      }
+
+      // avoid duplicates
+      if ((msg.readBy || []).includes(by)) {
+        return msg;
+      }
+
+      return {
+        ...msg,
+        readBy: [...(msg.readBy || []), by],
+      };
+    });
+
+    return {
+      messagesByChat: {
+        ...state.messagesByChat,
+        [chatId]: {
+          ...entry,
+          data: updatedMessages,
+        },
+      },
+    };
+  });
+},
+
 }));
 
 export default messageStore;
