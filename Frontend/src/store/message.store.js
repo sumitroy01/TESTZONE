@@ -138,41 +138,80 @@ const messageStore = create((set, get) => ({
 
   /* ---------- mark as read ---------- */
 
-  markAsRead: async ({ chatId, messageId, userId, silent = false }) => {
-    if (!chatId && !messageId) return { success: false };
+  // markAsRead: async ({ chatId, messageId, userId, silent = false }) => {
+  //   if (!chatId && !messageId) return { success: false };
 
-    set({ isMarkingRead: true });
-    try {
-      await axiosInstance.put("/api/message/read", {
-        chatId,
-        messageId,
+  //   set({ isMarkingRead: true });
+  //   try {
+  //     await axiosInstance.put("/api/message/read", {
+  //       chatId,
+  //       messageId,
+  //     });
+
+  //     set((state) => {
+  //       const updated = { ...state.messagesByChat };
+
+  //       Object.values(updated).forEach((entry) => {
+  //         if (!entry?.data) return;
+  //         entry.data = entry.data.map((msg) =>
+  //           String(msg._id) === String(messageId) && userId
+  //             ? { ...msg, readBy: [...(msg.readBy || []), userId] }
+  //             : msg
+  //         );
+  //       });
+
+  //       return { messagesByChat: updated };
+  //     });
+
+  //     if (!silent) toast.success("marked as read");
+  //     return { success: true };
+  //   } catch (error) {
+  //     if (handleAuthError(error)) return { success: false };
+  //     if (!silent) toast.error("could not mark as read");
+  //     return { success: false };
+  //   } finally {
+  //     set({ isMarkingRead: false });
+  //   }
+  // },
+
+markAsRead: async ({ chatId, userId, silent }) => {
+  try {
+    await api.put("/api/message/read", { chatId });
+
+    // UPDATE LOCAL STATE
+    set((state) => {
+      const entry = state.messagesByChat[chatId];
+      if (!entry) return {};
+
+      const updated = entry.data.map((msg) => {
+        if (
+          msg.sender?._id === userId ||
+          msg.readBy?.some((u) => String(u) === String(userId))
+        ) {
+          return msg;
+        }
+
+        return {
+          ...msg,
+          readBy: [...(msg.readBy || []), userId],
+        };
       });
 
-      set((state) => {
-        const updated = { ...state.messagesByChat };
+      return {
+        messagesByChat: {
+          ...state.messagesByChat,
+          [chatId]: {
+            ...entry,
+            data: updated,
+          },
+        },
+      };
+    });
+  } catch (err) {
+    if (!silent) console.error("markAsRead failed", err);
+  }
+},
 
-        Object.values(updated).forEach((entry) => {
-          if (!entry?.data) return;
-          entry.data = entry.data.map((msg) =>
-            String(msg._id) === String(messageId) && userId
-              ? { ...msg, readBy: [...(msg.readBy || []), userId] }
-              : msg
-          );
-        });
-
-        return { messagesByChat: updated };
-      });
-
-      if (!silent) toast.success("marked as read");
-      return { success: true };
-    } catch (error) {
-      if (handleAuthError(error)) return { success: false };
-      if (!silent) toast.error("could not mark as read");
-      return { success: false };
-    } finally {
-      set({ isMarkingRead: false });
-    }
-  },
 
   /* ---------- delete message ---------- */
 
