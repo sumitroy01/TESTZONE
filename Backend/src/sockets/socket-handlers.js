@@ -1,127 +1,141 @@
+// server/socket-handlers.js
 import Messages from "../models/message-models.js";
 import Chats from "../models/chat-models.js";
 import {
+  getReceiverSocketIds,
   addUserSocket,
   removeUserSocket,
   getOnlineUsers,
-  getReceiverSocketIds,
   emitToRoom,
   emitToUser,
-  setActiveChat,
-  clearActiveChat,
-  getActiveChat,
 } from "./socket.js";
 
+/**
+ * attachSocketHandlers(io) - call from index.js after initSocket(server)
+ */
 export function attachSocketHandlers(io) {
+  if (!io) throw new Error("Socket.IO instance required");
+
   io.on("connection", (socket) => {
-    const userId = socket.data?.userId;
-    const socketId = socket.id;
+    const sid = socket.id;
+    const userId = socket.data?.userId || socket.handshake.query?.userId || null;
 
-    console.log("socket connected:", socketId, "user:", userId);
+    console.log("socket connected:", sid, "userId:", userId);
 
-    if (userId) addUserSocket(userId, socketId);
+    // Presence
+    if (userId) addUserSocket(String(userId), sid);
     io.emit("getOnlineUsers", getOnlineUsers());
 
-    /* ========== ROOMS ========== */
-
-    socket.on("join_room", (chatId) => {
-      if (chatId) socket.join(chatId);
+    // Join/leave rooms
+    socket.on("join_room", (roomId) => {
+      if (!roomId) return;
+      socket.join(roomId);
     });
 
-    socket.on("leave_room", (chatId) => {
-      if (chatId) socket.leave(chatId);
+    socket.on("leave_room", (roomId) => {
+      if (!roomId) return;
+      socket.leave(roomId);
     });
 
-    /* ========== CHAT PRESENCE ========== */
-
-    socket.on("chat:open", async ({ chatId }) => {
-      if (!userId || !chatId) return;
-
-      setActiveChat(userId, chatId);
-
-      await Messages.updateMany(
-        { chat: chatId, readBy: { $ne: userId } },
-        { $addToSet: { readBy: userId } }
-      );
-
-      emitToRoom(chatId, "messages_read", {
-        chatId,
-        by: String(userId),
-      });
-    });
-
-    socket.on("chat:close", ({ chatId }) => {
-      if (!userId || !chatId) return;
-      clearActiveChat(userId, chatId);
-    });
-
-    /* ========== SEND MESSAGE ========== */
-
+    // send_message
+    // payload: { chatId, content, messageType?, clientId?, receiver? }
     socket.on("send_message", async (payload = {}, ack) => {
       try {
-        const { chatId, content, messageType = "text", clientId } = payload;
-        if (!chatId || !userId) return;
+        const senderId = socket.data?.userId;
+        if (!senderId) return ack?.({ ok: false, error: "not_authenticated" });
+
+        const { chatId, content, messageType = "text", clientId, receiver } = payload;
+        if (!chatId) return ack?.({ ok: false, error: "chatId required" });
+        if (messageType === "text" && !content) return ack?.({ ok: false, error: "content required" });
 
         const chat = await Chats.findById(chatId).select("allUsers isGroup");
-        if (!chat) return;
+        if (!chat) return ack?.({ ok: false, error: "chat_not_found" });
 
-        let receiverId;
-        if (!chat.isGroup) {
-          receiverId = chat.allUsers.find(
-            (u) => String(u) !== String(userId)
-          );
-        } else {
-          receiverId = userId;
+        let receiverId = receiver;
+        if (!receiverId) {
+          if (!chat.isGroup) {
+            const other = (chat.allUsers || []).find((u) => String(u) !== String(senderId));
+            receiverId = other || senderId;
+          } else {
+            receiverId = senderId;
+          }
         }
 
-        const receiverActiveChat = getActiveChat(receiverId);
-        const readBy = [userId];
-
-        if (receiverActiveChat === String(chatId)) {
-          readBy.push(receiverId);
-        }
-
-        const message = await Messages.create({
+        const created = await Messages.create({
           chat: chatId,
-          sender: userId,
-          receiver: receiverId,
           content,
+          sender: senderId,
+          receiver: receiverId,
+          readBy: [senderId],
           messageType,
-          readBy,
         });
 
-        const fullMessage = await Messages.findById(message._id)
+        const fullMessage = await Messages.findById(created._id)
           .populate("sender", "-password")
           .populate("chat");
 
-        emitToRoom(chatId, "message", {
-          ...fullMessage.toObject(),
-          clientId: clientId || null,
+        // best-effort update latestMessage
+        Chats.findByIdAndUpdate(chatId, { latestMessage: fullMessage._id }).catch(() => {});
+
+        // broadcast to room
+        io.to(chatId).emit("message", { ...fullMessage.toObject(), clientId: clientId || null });
+
+        // ensure receiver's direct sockets also get message
+        const recipients = getReceiverSocketIds(String(receiverId));
+        recipients.forEach((tsid) => {
+          io.to(tsid).emit("message", { ...fullMessage.toObject(), clientId: clientId || null });
         });
 
-        emitToUser(receiverId, "message", {
-          ...fullMessage.toObject(),
-          clientId: clientId || null,
-        });
-
-        if (receiverActiveChat === String(chatId)) {
-          emitToRoom(chatId, "messages_read", {
-            chatId,
-            by: String(receiverId),
-          });
-        }
-
-        ack?.({ ok: true, messageId: message._id });
+        ack?.({ ok: true, messageId: created._id, clientId: clientId || null });
       } catch (err) {
         console.error("send_message error:", err);
-        ack?.({ ok: false });
+        ack?.({ ok: false, error: "server_error" });
       }
     });
 
-    /* ========== DISCONNECT ========== */
+    // typing indicator
+    socket.on("typing", (payload = {}) => {
+      const { chatId, isTyping } = payload;
+      if (!chatId) return;
+      socket.to(chatId).emit("typing", { userId: socket.data?.userId, isTyping });
+    });
 
-    socket.on("disconnect", () => {
-      if (userId) removeUserSocket(userId, socketId);
+    // mark_read
+    socket.on("mark_read", async (payload = {}) => {
+      try {
+        const user = socket.data?.userId;
+        if (!user) return;
+        const { chatId, messageId } = payload;
+        if (!chatId && !messageId) return;
+        const filter = messageId ? { _id: messageId } : { chat: chatId };
+        await Messages.updateMany(filter, { $addToSet: { readBy: user } });
+        if (chatId) io.to(chatId).emit("messages_read", { chatId, by: user, messageId: messageId || null });
+      } catch (err) {
+        console.error("mark_read error:", err);
+      }
+    });
+
+    // delete_message (optional)
+    socket.on("delete_message", async (payload = {}, ack) => {
+      try {
+        const { messageId } = payload;
+        if (!messageId) return ack?.({ ok: false, error: "messageId required" });
+        const msg = await Messages.findById(messageId);
+        if (!msg) return ack?.({ ok: false, error: "message_not_found" });
+        if (String(msg.sender) !== String(socket.data?.userId)) return ack?.({ ok: false, error: "not_allowed" });
+
+        await Messages.deleteOne({ _id: messageId });
+        io.to(String(msg.chat)).emit("message_deleted", { messageId, chatId: msg.chat });
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error("delete_message error:", err);
+        ack?.({ ok: false, error: "server_error" });
+      }
+    });
+
+    socket.on("disconnect", (reason) => {
+      console.log("socket disconnected:", sid, "userId:", userId, "reason:", reason);
+      if (userId) removeUserSocket(String(userId), sid);
       io.emit("getOnlineUsers", getOnlineUsers());
     });
   });

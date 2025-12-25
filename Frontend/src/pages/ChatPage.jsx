@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRef } from "react";
+
 
 import authStore from "../store/auth.store.js";
 import chatstore from "../store/chat.store.js";
 import userstore from "../store/user.store.js";
 import messageStore from "../store/message.store.js";
-
-import { getSocket } from "../socket.js";
 
 import ChatSidebar from "../components/chat/ChatSidebar.jsx";
 import ChatWindow from "../components/chat/ChatWindow.jsx";
@@ -14,6 +14,8 @@ import EditGroupModal from "../components/chat/EditGroupModal.jsx";
 
 function ChatPage() {
   const { authUser } = authStore();
+  const initialAttemptRef = useRef(false);
+  const lastReadAtRef = useRef(0);
 
   const {
     chats,
@@ -38,8 +40,10 @@ function ChatPage() {
   const {
     messagesByChat,
     fetchMessages,
+    sendMessage,
     isSendingMessage,
     isFetchingMessages,
+    markAsRead,
   } = messageStore();
 
   const findUser = userstore((state) => state.findUser);
@@ -50,60 +54,49 @@ function ChatPage() {
   const [groupName, setGroupName] = useState("");
   const [searchUserName, setSearchUserName] = useState("");
   const [selectedUsers, setSelectedUsers] = useState([]);
+
   const [isEditingGroup, setIsEditingGroup] = useState(false);
 
-  // mobile
+  // mobile: true = show sidebar, false = show chat window
   const [showSidebarOnMobile, setShowSidebarOnMobile] = useState(true);
-
-  const prevChatIdRef = useRef(null);
 
   const activeMessagesEntry = selectedChat
     ? messagesByChat[selectedChat._id]
     : null;
   const messages = activeMessagesEntry?.data || [];
 
-  /* ---------------- fetch chats ---------------- */
+  useEffect(() => {
+  if (chats.length === 0 && !isFetchingChats) {
+    fetchChats(1, limit);
+  }
+}, [chats.length, isFetchingChats, fetchChats, limit]);
 
   useEffect(() => {
-    if (chats.length === 0 && !isFetchingChats) {
-      fetchChats(1, limit);
-    }
-  }, [chats.length, fetchChats, limit, isFetchingChats]);
+  if (!selectedChat?._id || !authUser?._id) return;
 
-  /* ---------------- chat presence (IMPORTANT) ---------------- */
+  const now = Date.now();
+
+  //  allow only once every 15 seconds
+  if (now - lastReadAtRef.current < 15000) return;
+
+  lastReadAtRef.current = now;
+
+  markAsRead({
+    chatId: selectedChat._id,
+    userId: authUser._id,
+    silent: true,
+  });
+}, [selectedChat?._id, authUser?._id, markAsRead]);
+
 
   useEffect(() => {
-    const socket = getSocket();
-    if (!socket || !authUser?._id) return;
+  if (!selectedChat?._id) return;
 
-    const currentChatId = selectedChat?._id;
-    const prevChatId = prevChatIdRef.current;
+  if (!messagesByChat[selectedChat._id]) {
+    fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
+  }
+}, [selectedChat?._id, fetchMessages]);
 
-    // close previous chat
-    if (prevChatId && prevChatId !== currentChatId) {
-      socket.emit("chat:close", { chatId: prevChatId });
-    }
-
-    // open current chat
-    if (currentChatId) {
-      socket.emit("chat:open", { chatId: currentChatId });
-
-      // fetch messages once per chat
-      if (!messagesByChat[currentChatId]) {
-        fetchMessages({ chatId: currentChatId, page: 1, limit: 50 });
-      }
-    }
-
-    prevChatIdRef.current = currentChatId;
-
-    return () => {
-      if (currentChatId) {
-        socket.emit("chat:close", { chatId: currentChatId });
-      }
-    };
-  }, [selectedChat?._id, authUser?._id]);
-
-  /* ---------------- derived data ---------------- */
 
   const sortedChats = useMemo(() => {
     return [...chats].sort((a, b) => {
@@ -113,11 +106,9 @@ function ChatPage() {
     });
   }, [chats]);
 
-  /* ---------------- handlers ---------------- */
-
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
-    setShowSidebarOnMobile(false);
+    setShowSidebarOnMobile(false); // go to messages on mobile
   };
 
   const handleLoadMoreChats = () => {
@@ -130,6 +121,7 @@ function ChatPage() {
     if (payload?.content && typeof payload.content === "string") {
       if (!payload.content.trim()) return;
     }
+
     await messageStore.getState().sendMessage(payload);
   };
 
@@ -145,7 +137,6 @@ function ChatPage() {
   const handleCreateGroup = async ({ groupAvatar }) => {
     if (!groupName.trim() || selectedUsers.length === 0) return;
     const users = selectedUsers.map((u) => u._id);
-
     await createGroupChat({ name: groupName.trim(), users, groupAvatar });
 
     setIsCreatingGroup(false);
@@ -169,6 +160,8 @@ function ChatPage() {
     } else if (accessChat) {
       accessChat(user._id);
       setShowSidebarOnMobile(false);
+    } else {
+      setSelectedChat(null);
     }
   };
 
@@ -196,8 +189,6 @@ function ChatPage() {
     }
   };
 
-  /* ---------------- render ---------------- */
-
   return (
     <div className="h-[calc(100vh-5rem)] w-full max-w-6xl mx-auto rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden flex flex-col shadow-2xl shadow-black/40">
       {/* Mobile top bar */}
@@ -206,6 +197,7 @@ function ChatPage() {
           onClick={() => setShowSidebarOnMobile((prev) => !prev)}
           className="p-2 rounded-xl hover:bg-white/10 active:scale-95 transition"
         >
+          <span className="sr-only">Toggle chat list</span>
           <div className="space-y-1">
             <span className="block w-5 h-0.5 bg-white" />
             <span className="block w-5 h-0.5 bg-white" />
