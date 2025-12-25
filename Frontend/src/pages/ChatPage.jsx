@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRef } from "react";
+
 
 import authStore from "../store/auth.store.js";
 import chatstore from "../store/chat.store.js";
@@ -12,11 +14,8 @@ import EditGroupModal from "../components/chat/EditGroupModal.jsx";
 
 function ChatPage() {
   const { authUser } = authStore();
+  const initialAttemptRef = useRef(false);
 
-  /* ---------- refs ---------- */
-  const readIntervalRef = useRef(null);
-
-  /* ---------- stores ---------- */
   const {
     chats,
     selectedChat,
@@ -50,45 +49,112 @@ function ChatPage() {
   const userFound = userstore((state) => state.userFound);
   const isSearchingUser = userstore((state) => state.isSearchingUser);
 
-  /* ---------- local UI state ---------- */
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [searchUserName, setSearchUserName] = useState("");
   const [selectedUsers, setSelectedUsers] = useState([]);
+
   const [isEditingGroup, setIsEditingGroup] = useState(false);
+
+  // mobile: true = show sidebar, false = show chat window
   const [showSidebarOnMobile, setShowSidebarOnMobile] = useState(true);
 
-  
   const activeMessagesEntry = selectedChat
     ? messagesByChat[selectedChat._id]
     : null;
-
   const messages = activeMessagesEntry?.data || [];
-  const readOnceRef = useRef(new Set());
 
-  useEffect(() => {
+  // useEffect(() => {
+  //   if (!chats.length && !isFetchingChats) {
+  //     fetchChats(1, limit);
+  //   }
+  // }, [chats, isFetchingChats, fetchChats, limit]);
+ useEffect(() => {
+  if (chats.length === 0 && !isFetchingChats) {
+    fetchChats(1, limit);
+  }
+}, [chats.length, fetchChats, limit]);
+// Add these to your existing refs at the top of the component
+const readTimeoutRef = useRef(null);
+const readCooldownRef = useRef({});
+const readOnceRef = useRef(new Set());
+
+// Replace your current useEffect with this implementation
+useEffect(() => {
   if (!selectedChat || !authUser?._id) return;
-
+  
   const chatId = selectedChat._id;
-
-  // fetch messages once
+  
+  // Fetch messages once (keep your existing logic)
   if (!messagesByChat[chatId]) {
     fetchMessages({ chatId, page: 1, limit: 50 });
   }
-
-  // ✅ MARK READ ONLY ONCE PER CHAT
-  if (!readOnceRef.current.has(chatId)) {
+  
+  // Clear any existing timeout
+  if (readTimeoutRef.current) {
+    clearTimeout(readTimeoutRef.current);
+  }
+  
+  // Check if we're in cooldown for this specific chat
+  const now = Date.now();
+  const lastReadTime = readCooldownRef.current[chatId] || 0;
+  
+  // Only trigger if at least 10 seconds have passed since last read
+  if (now - lastReadTime >= 10000) {
+    // Set a cooldown to prevent immediate re-triggering
+    readCooldownRef.current[chatId] = now;
+    
+    // Execute the read immediately
     markAsRead({
       chatId,
       userId: authUser._id,
       silent: true,
     });
-
-    readOnceRef.current.add(chatId);
+    
+    // Clear the one-time set
+    if (readOnceRef.current.has(chatId)) {
+      readOnceRef.current.delete(chatId);
+    }
+  } else {
+    // If in cooldown, schedule for when cooldown ends
+    const timeRemaining = 10000 - (now - lastReadTime);
+    
+    readTimeoutRef.current = setTimeout(() => {
+      markAsRead({
+        chatId,
+        userId: authUser._id,
+        silent: true,
+      });
+      
+      // Update cooldown
+      readCooldownRef.current[chatId] = Date.now();
+      
+      // Clear the one-time set
+      if (readOnceRef.current.has(chatId)) {
+        readOnceRef.current.delete(chatId);
+      }
+    }, timeRemaining);
   }
+  
+  // Cleanup function
+  return () => {
+    if (readTimeoutRef.current) {
+      clearTimeout(readTimeoutRef.current);
+    }
+  };
 }, [selectedChat, authUser, fetchMessages, markAsRead, messagesByChat]);
 
-  /* ---------- sort chats ---------- */
+// Add this useEffect to handle component unmounting
+useEffect(() => {
+  return () => {
+    // Cleanup all timeouts when component unmounts
+    if (readTimeoutRef.current) {
+      clearTimeout(readTimeoutRef.current);
+    }
+  };
+}, []); 
+
+
   const sortedChats = useMemo(() => {
     return [...chats].sort((a, b) => {
       const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
@@ -97,11 +163,9 @@ function ChatPage() {
     });
   }, [chats]);
 
-  /* ---------- handlers ---------- */
-
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
-    setShowSidebarOnMobile(false);
+    setShowSidebarOnMobile(false); // go to messages on mobile
   };
 
   const handleLoadMoreChats = () => {
@@ -114,25 +178,23 @@ function ChatPage() {
     if (payload?.content && typeof payload.content === "string") {
       if (!payload.content.trim()) return;
     }
-    await sendMessage(payload);
+
+    await messageStore.getState().sendMessage(payload);
   };
 
   const toggleUserInGroup = (user) => {
-    setSelectedUsers((prev) =>
-      prev.some((u) => u._id === user._id)
-        ? prev.filter((u) => u._id !== user._id)
-        : [...prev, user]
-    );
+    const exists = selectedUsers.find((u) => u._id === user._id);
+    if (exists) {
+      setSelectedUsers((prev) => prev.filter((u) => u._id !== user._id));
+    } else {
+      setSelectedUsers((prev) => [...prev, user]);
+    }
   };
 
   const handleCreateGroup = async ({ groupAvatar }) => {
     if (!groupName.trim() || selectedUsers.length === 0) return;
-
-    await createGroupChat({
-      name: groupName.trim(),
-      users: selectedUsers.map((u) => u._id),
-      groupAvatar,
-    });
+    const users = selectedUsers.map((u) => u._id);
+    await createGroupChat({ name: groupName.trim(), users, groupAvatar });
 
     setIsCreatingGroup(false);
     setGroupName("");
@@ -145,17 +207,19 @@ function ChatPage() {
 
     const existing = chats.find((chat) => {
       if (chat.isGroupChat || chat.isGroup) return false;
-      const users = chat.users || chat.allUsers || [];
-      return users.some((u) => u._id === user._id);
+      const other = (chat.users || []).find((u) => u._id === user._id);
+      return !!other;
     });
 
     if (existing) {
       setSelectedChat(existing);
+      setShowSidebarOnMobile(false);
     } else if (accessChat) {
       accessChat(user._id);
+      setShowSidebarOnMobile(false);
+    } else {
+      setSelectedChat(null);
     }
-
-    setShowSidebarOnMobile(false);
   };
 
   const handleOpenEditGroup = (chat) => {
@@ -175,18 +239,47 @@ function ChatPage() {
     if (!target?._id) return;
 
     deleteChat(target._id);
-    setSelectedChat(null);
-    setShowSidebarOnMobile(true);
-  };
 
-  /* ---------- UI ---------- */
+    if (selectedChat?._id === target._id) {
+      setSelectedChat(null);
+      setShowSidebarOnMobile(true);
+    }
+  };
 
   return (
     <div className="h-[calc(100vh-5rem)] w-full max-w-6xl mx-auto rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl overflow-hidden flex flex-col shadow-2xl shadow-black/40">
+      {/* Mobile top bar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 md:hidden">
+        <button
+          onClick={() => setShowSidebarOnMobile((prev) => !prev)}
+          className="p-2 rounded-xl hover:bg-white/10 active:scale-95 transition"
+        >
+          <span className="sr-only">Toggle chat list</span>
+          <div className="space-y-1">
+            <span className="block w-5 h-0.5 bg-white" />
+            <span className="block w-5 h-0.5 bg-white" />
+            <span className="block w-5 h-0.5 bg-white" />
+          </div>
+        </button>
+
+        <div className="text-xs font-medium text-white/80 truncate max-w-[60%]">
+          {showSidebarOnMobile
+            ? "Chats"
+            : selectedChat?.chatName ||
+              selectedChat?.groupName ||
+              "Messages"}
+        </div>
+
+        <div className="w-8" />
+      </div>
+
+      {/* Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar */}
         <div
-          className={`${showSidebarOnMobile ? "flex" : "hidden"} md:flex w-full md:w-72`}
+          className={`${
+            showSidebarOnMobile ? "flex" : "hidden"
+          } md:flex w-full md:w-72 h-full`}
         >
           <ChatSidebar
             chats={sortedChats}
@@ -210,7 +303,9 @@ function ChatPage() {
 
         {/* Chat window */}
         <div
-          className={`${showSidebarOnMobile ? "hidden" : "flex"} md:flex flex-1`}
+          className={`${
+            showSidebarOnMobile ? "hidden" : "flex"
+          } md:flex flex-1 h-full`}
         >
           <ChatWindow
             selectedChat={selectedChat}
@@ -247,6 +342,11 @@ function ChatPage() {
           onClose={() => setIsEditingGroup(false)}
           chat={selectedChat}
           authUserId={authUser?._id}
+          searchUserName={searchUserName}
+          setSearchUserName={setSearchUserName}
+          userFound={userFound}
+          isSearchingUser={isSearchingUser}
+          findUser={findUser}
           renameGroup={renameGroup}
           addToGroup={addToGroup}
           removeFromGroup={removeFromGroup}
