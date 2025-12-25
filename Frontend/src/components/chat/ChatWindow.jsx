@@ -18,19 +18,23 @@ function ChatWindow({
   const handleSend = async (payload) => {
     if (!selectedChat?._id) return;
 
+    // media message
     if (payload.mediaFile) {
       const form = new FormData();
       form.append("chatId", selectedChat._id);
+
       if (payload.content) form.append("content", payload.content);
       if (payload.messageType) form.append("messageType", payload.messageType);
       if (payload.audioDuration != null) {
         form.append("audioDuration", String(payload.audioDuration));
       }
+
       form.append("media", payload.mediaFile);
       await onSend(form);
       return;
     }
 
+    // text message
     const text =
       typeof payload.content === "string" ? payload.content.trim() : "";
     if (!text) return;
@@ -54,6 +58,7 @@ function ChatWindow({
             onDeleteChat={onDeleteChat}
             isDeletingChat={isDeletingChat}
           />
+
           <ChatMessages
             messages={messages}
             isFetchingMessages={isFetchingMessages}
@@ -62,6 +67,7 @@ function ChatWindow({
             isGroupChat={isGroupChat}
             selectedChat={selectedChat}
           />
+
           <ChatInput onSend={handleSend} isSending={isSending} />
         </>
       ) : (
@@ -71,7 +77,80 @@ function ChatWindow({
   );
 }
 
-/* ===================== MESSAGES ===================== */
+/* ---------------- HEADER ---------------- */
+
+function ChatHeader({
+  chat,
+  isGroupChat,
+  authUserId,
+  onEditGroup,
+  onDeleteChat,
+  isDeletingChat,
+}) {
+  const otherUser =
+    !isGroupChat && Array.isArray(chat?.users)
+      ? chat.users.find((u) => String(u._id) !== String(authUserId))
+      : null;
+
+  const title = isGroupChat
+    ? chat.chatName || chat.groupName || "Group"
+    : otherUser?.name ||
+      otherUser?.username ||
+      otherUser?.email ||
+      "Conversation";
+
+  const subtitle = isGroupChat
+    ? `${chat?.users?.length || 0} members`
+    : "Direct message";
+
+  const avatar = isGroupChat ? chat.groupAvatar : otherUser?.avatar;
+
+  const avatarInitial = isGroupChat
+    ? (chat.chatName || "G")[0].toUpperCase()
+    : (otherUser?.name || "U")[0].toUpperCase();
+
+  return (
+    <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between bg-slate-950/70 backdrop-blur-md">
+      <div className="flex items-center gap-3">
+        <div className="h-9 w-9 rounded-full overflow-hidden">
+          {avatar ? (
+            <img src={avatar} alt="avatar" className="h-full w-full object-cover" />
+          ) : (
+            <div className="h-full w-full rounded-full bg-gradient-to-br from-emerald-500 to-sky-500 flex items-center justify-center text-xs font-semibold text-slate-950">
+              {avatarInitial}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="text-sm font-semibold text-neutral-50">{title}</p>
+          <p className="text-[11px] text-neutral-400">{subtitle}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {isGroupChat && (
+          <button
+            className="text-[11px] px-2.5 py-1.5 rounded-full bg-white/5 hover:bg-white/10"
+            onClick={() => onEditGroup?.(chat)}
+          >
+            Edit group
+          </button>
+        )}
+
+        <button
+          className="text-[11px] px-2.5 py-1.5 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-300"
+          onClick={() => onDeleteChat?.(chat)}
+          disabled={isDeletingChat}
+        >
+          {isDeletingChat ? "Deleting..." : "Delete"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- MESSAGES ---------------- */
 
 function ChatMessages({
   messages,
@@ -81,158 +160,85 @@ function ChatMessages({
   isGroupChat,
   selectedChat,
 }) {
-  const { markAsRead, deleteMessage } = messageStore();
+  const { deleteMessage } = messageStore();
 
   const containerRef = useRef(null);
   const bottomRef = useRef(null);
-  const lastReadAtRef = useRef(0);
-
-  const [isUserNearBottom, setIsUserNearBottom] = useState(true);
   const [activeMenuId, setActiveMenuId] = useState(null);
 
-  const showEmptyState = !isFetchingMessages && messages.length === 0;
-
-  const otherUser =
-    !isGroupChat && Array.isArray(selectedChat?.users)
-      ? selectedChat.users.find((u) => String(u._id) !== String(authUserId))
-      : null;
-  const otherUserId = otherUser?._id;
-
-  const handleScroll = () => {
-    const el = containerRef.current;
-    if (!el) return;
-    const threshold = 80;
-    const distance =
-      el.scrollHeight - el.scrollTop - el.clientHeight;
-    setIsUserNearBottom(distance < threshold);
-  };
-
   useEffect(() => {
-    if (!containerRef.current || !bottomRef.current) return;
-    if (!isUserNearBottom) return;
-    bottomRef.current.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isUserNearBottom]);
-
-  /* ✅ FINAL FIX: 15s THROTTLED READ */
-  useEffect(() => {
-    if (!chatId || !authUserId) return;
-    if (!messages.length) return;
-    if (!isUserNearBottom) return;
-
-    const now = Date.now();
-    if (now - lastReadAtRef.current < 15000) return;
-
-    lastReadAtRef.current = now;
-
-    markAsRead({
-      chatId,
-      userId: authUserId,
-      silent: true,
-    });
-  }, [chatId, authUserId, isUserNearBottom]);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
 
   const normalizeId = (val) =>
     typeof val === "string" ? val : val?._id?.toString();
 
+  const otherUser =
+    !isGroupChat && selectedChat?.users
+      ? selectedChat.users.find((u) => normalizeId(u._id) !== normalizeId(authUserId))
+      : null;
+
   const getMessageStatus = (msg) => {
-    const readByIds = Array.isArray(msg.readBy)
-      ? msg.readBy.map(normalizeId)
-      : [];
+    const readByIds = (msg.readBy || []).map(normalizeId);
 
     if (isGroupChat) {
-      const senderId = normalizeId(msg.sender);
-      return readByIds.some((id) => id !== senderId)
-        ? "read"
-        : "sent";
-    } else {
-      return readByIds.includes(normalizeId(otherUserId))
-        ? "read"
-        : "sent";
+      return readByIds.length > 1 ? "read" : "sent";
     }
-  };
-
-  const MessageTicks = ({ msg }) =>
-    getMessageStatus(msg) === "read" ? (
-      <span className="text-[10px] text-white ml-1">✓✓</span>
-    ) : (
-      <span className="text-[10px] text-white/60 ml-1">✓</span>
-    );
-
-  const toggleMenu = (id) =>
-    setActiveMenuId((prev) => (prev === id ? null : id));
-
-  const handleDelete = async (e, messageId) => {
-    e.stopPropagation();
-    await deleteMessage({ messageId, chatId });
-    setActiveMenuId(null);
+    return readByIds.includes(normalizeId(otherUser?._id)) ? "read" : "sent";
   };
 
   return (
     <div
       ref={containerRef}
-      onScroll={handleScroll}
       className="flex-1 overflow-y-auto px-3 py-3 space-y-2"
     >
-      {showEmptyState && (
-        <div className="h-full flex items-center justify-center text-xs text-neutral-400">
-          No messages yet. Say something.
-        </div>
-      )}
+      {!isFetchingMessages &&
+        messages.map((msg) => {
+          const isMine =
+            normalizeId(msg.sender) === normalizeId(authUserId);
 
-      {messages.map((msg) => {
-        const isMine =
-          String(msg.sender?._id || msg.sender) === String(authUserId);
-
-        return (
-          <div
-            key={msg._id}
-            className={`flex ${
-              isMine ? "justify-end" : "justify-start"
-            }`}
-            onClick={() => isMine && toggleMenu(msg._id)}
-          >
+          return (
             <div
-              className={`max-w-[75%] rounded-2xl px-3 py-2 ${
-                isMine
-                  ? "bg-emerald-600 text-white"
-                  : "bg-white/5 text-neutral-50"
-              }`}
+              key={msg._id}
+              className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+              onClick={() => isMine && setActiveMenuId(msg._id)}
             >
-              <p>{msg.content}</p>
-              <p className="mt-1 text-[10px] text-right flex items-center justify-end">
-                {new Date(msg.createdAt).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-                {isMine && <MessageTicks msg={msg} />}
-              </p>
-            </div>
+              <div
+                className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
+                  isMine
+                    ? "bg-emerald-600 text-white"
+                    : "bg-white/5 text-white"
+                }`}
+              >
+                <p>{msg.content}</p>
 
-            {isMine && activeMenuId === msg._id && (
-              <div className="absolute bg-slate-900 rounded-xl px-3 py-2">
-                <button
-                  onClick={(e) => handleDelete(e, msg._id)}
-                  className="text-[11px] text-red-400"
-                >
-                  Delete message
-                </button>
+                <div className="flex justify-end text-[10px] opacity-70">
+                  {new Date(msg.createdAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                  {isMine && (
+                    <span className="ml-1">
+                      {getMessageStatus(msg) === "read" ? "✓✓" : "✓"}
+                    </span>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
-        );
-      })}
+            </div>
+          );
+        })}
 
       <div ref={bottomRef} />
     </div>
   );
 }
 
-/* ===================== INPUT + EMPTY ===================== */
+/* ---------------- INPUT ---------------- */
 
 function ChatInput({ onSend, isSending }) {
   const [value, setValue] = useState("");
 
-  const handleSubmit = (e) => {
+  const submit = (e) => {
     e.preventDefault();
     if (!value.trim()) return;
     onSend({ content: value.trim(), messageType: "text" });
@@ -240,14 +246,19 @@ function ChatInput({ onSend, isSending }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="p-3 border-t border-white/10">
+    <form onSubmit={submit} className="p-3 border-t border-white/10 flex gap-2">
       <input
-        className="w-full bg-white/5 rounded-xl px-3 py-2 text-sm"
+        className="flex-1 bg-white/5 rounded-xl px-3 py-2 text-sm"
+        placeholder="Type a message"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Type a message"
       />
-      <button disabled={isSending} type="submit" hidden />
+      <button
+        disabled={isSending}
+        className="px-4 py-2 rounded-xl bg-emerald-500 text-slate-950 text-sm font-semibold"
+      >
+        Send
+      </button>
     </form>
   );
 }
@@ -255,7 +266,7 @@ function ChatInput({ onSend, isSending }) {
 function EmptyChatState() {
   return (
     <div className="flex-1 flex items-center justify-center text-neutral-400">
-      No conversation selected
+      Select a chat to start messaging
     </div>
   );
 }
