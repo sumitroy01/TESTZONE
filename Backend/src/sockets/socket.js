@@ -1,6 +1,8 @@
 // server/socket.js
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
+import cookie from "cookie";
+
 
 const userSocketMap = new Map(); // userId -> Set(socketId)
 let io = null;
@@ -41,19 +43,31 @@ export function initSocket(server, opts = {}) {
   });
 
   // small auth example: JWT in handshake.auth.token
-  io.use((socket, next) => {
-    try {
-      const token = socket.handshake.auth?.token;
-      if (!token) return next(); // allow anonymous; change to error to require auth
-      const payload = jwt.verify(token, process.env.JWT_SECRET);
-      socket.data.userId = String(payload.id);
-      socket.data.username = payload.username;
-      return next();
-    } catch (err) {
-      // allow anonymous if token missing/invalid (or call next(new Error('Auth error')))
-      return next();
-    }
-  });
+  // server/sockets/socket.js
+io.use((socket, next) => {
+  try {
+    const rawCookie = socket.request.headers.cookie;
+    if (!rawCookie) return next(); // allow unauthenticated sockets if you want
+
+    const cookies = cookie.parse(rawCookie);
+
+    // ⚠️ MUST match cookie name used in auth login
+    const token = cookies.token;
+
+    if (!token) return next();
+
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+
+    socket.data.userId = String(payload.id);
+    socket.data.username = payload.username;
+
+    return next();
+  } catch (err) {
+    console.error("Socket auth error:", err.message);
+    return next(); // or next(new Error("Authentication error"))
+  }
+});
+
 
   return io;
 }
