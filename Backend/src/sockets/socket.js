@@ -52,7 +52,8 @@ io.use((socket, next) => {
     const cookies = cookie.parse(rawCookie);
 
     // ⚠️ MUST match cookie name used in auth login
-    const token = cookies.token;
+    
+const token = cookies.jwt;
 
     if (!token) return next();
 
