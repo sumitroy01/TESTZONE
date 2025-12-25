@@ -10,13 +10,11 @@ import ChatWindow from "../components/chat/ChatWindow.jsx";
 import CreateGroupModal from "../components/chat/CreateGroupModal.jsx";
 import EditGroupModal from "../components/chat/EditGroupModal.jsx";
 
-import { getSocket, markJoinedRoom, markLeftRoom } from "../socket.js";
-
 function ChatPage() {
   const { authUser } = authStore();
 
   /* ---------- refs ---------- */
-  const prevChatIdRef = useRef(null);
+  const readIntervalRef = useRef(null);
 
   /* ---------- stores ---------- */
   const {
@@ -45,7 +43,7 @@ function ChatPage() {
     sendMessage,
     isSendingMessage,
     isFetchingMessages,
-    markAsRead, // 🔒 guarded in store
+    markAsRead,
   } = messageStore();
 
   const findUser = userstore((state) => state.findUser);
@@ -60,54 +58,35 @@ function ChatPage() {
   const [isEditingGroup, setIsEditingGroup] = useState(false);
   const [showSidebarOnMobile, setShowSidebarOnMobile] = useState(true);
 
-  /* ---------- derived ---------- */
+  
   const activeMessagesEntry = selectedChat
     ? messagesByChat[selectedChat._id]
     : null;
 
   const messages = activeMessagesEntry?.data || [];
 
-  
-  /* ---------- CHAT OPEN / SWITCH (ONLY PLACE READ IS TRIGGERED) ---------- */
   useEffect(() => {
     if (!selectedChat || !authUser?._id) return;
 
-    const socket = getSocket();
-    const chatId = String(selectedChat._id);
-
-    // leave previous room
-    if (prevChatIdRef.current && prevChatIdRef.current !== chatId) {
-      socket?.emit("leave_room", prevChatIdRef.current);
-      markLeftRoom(prevChatIdRef.current);
+    if (readIntervalRef.current) {
+      clearInterval(readIntervalRef.current);
     }
 
-    // join new room
-    socket?.emit("join_room", chatId);
-    markJoinedRoom(chatId);
-    prevChatIdRef.current = chatId;
+    readIntervalRef.current = setInterval(() => {
+      markAsRead({
+        chatId: selectedChat._id,
+        userId: authUser._id,
+        silent: true,
+      });
+    }, 10_000);
 
-    // fetch messages if not already loaded
-    if (!messagesByChat[chatId]) {
-      fetchMessages({ chatId, page: 1, limit: 50 });
-    }
-
-    // ✅ READ TRIGGER (SAFE — STORE GUARDED)
-    markAsRead({
-      chatId,
-      userId: authUser._id,
-      silent: true,
-    });
-  }, [selectedChat, authUser, fetchMessages, markAsRead]);
-
-  /* ---------- cleanup ---------- */
-  useEffect(() => {
     return () => {
-      const socket = getSocket();
-      if (prevChatIdRef.current) {
-        socket?.emit("leave_room", prevChatIdRef.current);
+      if (readIntervalRef.current) {
+        clearInterval(readIntervalRef.current);
+        readIntervalRef.current = null;
       }
     };
-  }, []);
+  }, [selectedChat, authUser, fetchMessages, markAsRead, messagesByChat]);
 
   /* ---------- sort chats ---------- */
   const sortedChats = useMemo(() => {
@@ -122,24 +101,6 @@ function ChatPage() {
 
   const handleSelectChat = (chat) => {
     setSelectedChat(chat);
-    setShowSidebarOnMobile(false);
-  };
-
-  const handleSelectChatFromUser = (user) => {
-    if (!user) return;
-
-    const existing = chats.find((chat) => {
-      if (chat.isGroupChat || chat.isGroup) return false;
-      const users = chat.users || chat.allUsers || [];
-      return users.some((u) => u._id === user._id);
-    });
-
-    if (existing) {
-      setSelectedChat(existing);
-    } else if (accessChat) {
-      accessChat(user._id);
-    }
-
     setShowSidebarOnMobile(false);
   };
 
@@ -177,6 +138,24 @@ function ChatPage() {
     setGroupName("");
     setSearchUserName("");
     setSelectedUsers([]);
+  };
+
+  const handleSelectChatFromUser = (user) => {
+    if (!user) return;
+
+    const existing = chats.find((chat) => {
+      if (chat.isGroupChat || chat.isGroup) return false;
+      const users = chat.users || chat.allUsers || [];
+      return users.some((u) => u._id === user._id);
+    });
+
+    if (existing) {
+      setSelectedChat(existing);
+    } else if (accessChat) {
+      accessChat(user._id);
+    }
+
+    setShowSidebarOnMobile(false);
   };
 
   const handleOpenEditGroup = (chat) => {
