@@ -56,17 +56,43 @@ export function registerSocketListeners() {
     }
   });
 
-  // messages_read
-  socket.on("messages_read", (payload) => {
-    try {
-      const { chatId, by, messageId } = payload || {};
-      if (!chatId) return;
-      // local optimistic update: add 'by' to readBy for appropriate messages
-      messageStore.getState().markAsRead({ chatId, messageId, userId: by, silent: true });
-    } catch (err) {
-      console.error("socket messages_read handler", err);
-    }
+  socket.on("messages_read", ({ chatId, by, messageId }) => {
+  if (!chatId || !by) return;
+
+  messageStore.setState((state) => {
+    const entry = state.messagesByChat[chatId];
+    if (!entry?.data) return {};
+
+    return {
+      messagesByChat: {
+        ...state.messagesByChat,
+        [chatId]: {
+          ...entry,
+          data: entry.data.map((msg) => {
+            const senderId =
+              typeof msg.sender === "string"
+                ? msg.sender
+                : msg.sender?._id;
+
+            // only update messages NOT sent by the reader
+            if (senderId === by) return msg;
+
+            const readByIds = (msg.readBy || []).map((v) =>
+              typeof v === "string" ? v : v?._id
+            );
+
+            if (readByIds.includes(by)) return msg;
+
+            return {
+              ...msg,
+              readBy: [...readByIds, by],
+            };
+          }),
+        },
+      },
+    };
   });
+});
 
   // online users update (if you use it)
   socket.on("getOnlineUsers", (usersArray) => {
