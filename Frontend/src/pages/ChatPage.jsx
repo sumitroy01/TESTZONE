@@ -142,7 +142,7 @@ useEffect(() => {
       clearTimeout(readTimeoutRef.current);
     }
   };
-}, [selectedChat, authUser, fetchMessages, markAsRead, messagesByChat]);
+}, [selectedChat, authUser, fetchMessages,messagesByChat]);
 
 // Add this useEffect to handle component unmounting
 useEffect(() => {
