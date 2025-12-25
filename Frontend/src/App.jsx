@@ -64,40 +64,41 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---- AUTH CHANGE EFFECT ---- */
-  useEffect(() => {
-    if (authUser) {
-      // fetch chats
-      const { fetchChats, page, limit } = chatstore.getState();
-      if (typeof fetchChats === "function") {
-        fetchChats(page || 1, limit || 50).catch(() => {});
-      }
-
-      setShowAuth(false);
-      setActiveView("chat");
-
-      // init socket
-      try {
-        const backend =
-          import.meta.env.VITE_BACKEND_URL || window.location.origin;
-        initSocket(backend);
-
-        setTimeout(() => {
-          try {
-            registerSocketListeners();
-          } catch {}
-        }, 50);
-      } catch {}
-    } else {
-      // logout cleanup
-      try {
-        const s = getSocket();
-        if (s?.disconnect) s.disconnect();
-      } catch {}
-
-      setActiveView("chat");
+ useEffect(() => {
+  if (authUser) {
+    // fetch chats
+    const { fetchChats, page, limit } = chatstore.getState();
+    if (typeof fetchChats === "function") {
+      fetchChats(page || 1, limit || 50).catch(() => {});
     }
-  }, [authUser]);
+
+    setShowAuth(false);
+    setActiveView("chat");
+
+    // ✅ INIT SOCKET WITH TOKEN
+    try {
+      const backend =
+        import.meta.env.VITE_BACKEND_URL || window.location.origin;
+
+      initSocket(backend, authUser?.token); // 🔥 THIS LINE FIXES EVERYTHING
+
+      setTimeout(() => {
+        try {
+          registerSocketListeners();
+        } catch {}
+      }, 50);
+    } catch {}
+  } else {
+    // logout cleanup
+    try {
+      const s = getSocket();
+      if (s?.disconnect) s.disconnect();
+    } catch {}
+
+    setActiveView("chat");
+  }
+}, [authUser]);
+
 
   /* ---- UI helpers ---- */
   const openAuth = (mode) => {
