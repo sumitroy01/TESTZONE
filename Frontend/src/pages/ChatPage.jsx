@@ -15,7 +15,6 @@ import EditGroupModal from "../components/chat/EditGroupModal.jsx";
 function ChatPage() {
   const { authUser } = authStore();
   const initialAttemptRef = useRef(false);
-  const lastReadAtRef = useRef(0);
 
   const {
     chats,
@@ -56,7 +55,6 @@ function ChatPage() {
   const [selectedUsers, setSelectedUsers] = useState([]);
 
   const [isEditingGroup, setIsEditingGroup] = useState(false);
-const [fetchedChats, setFetchedChats] = useState({});
 
   // mobile: true = show sidebar, false = show chat window
   const [showSidebarOnMobile, setShowSidebarOnMobile] = useState(true);
@@ -66,43 +64,27 @@ const [fetchedChats, setFetchedChats] = useState({});
     : null;
   const messages = activeMessagesEntry?.data || [];
 
-  useEffect(() => {
+  // useEffect(() => {
+  //   if (!chats.length && !isFetchingChats) {
+  //     fetchChats(1, limit);
+  //   }
+  // }, [chats, isFetchingChats, fetchChats, limit]);
+ useEffect(() => {
   if (chats.length === 0 && !isFetchingChats) {
     fetchChats(1, limit);
   }
-}, [chats.length, isFetchingChats, fetchChats, limit]);
+}, [chats.length, fetchChats, limit]);
+
+
 
   useEffect(() => {
-  if (!selectedChat?._id || !authUser?._id) return;
-
-  const now = Date.now();
-
-  //  allow only once every 15 seconds
-  if (now - lastReadAtRef.current < 15000) return;
-
-  lastReadAtRef.current = now;
-
-  markAsRead({
-    chatId: selectedChat._id,
-    userId: authUser._id,
-    silent: true,
-  });
-}, [selectedChat?._id, authUser?._id, markAsRead]);
-
-useEffect(() => {
-  if (!selectedChat?._id) return;
-
-  if (fetchedChats[selectedChat._id]) return;
-
-  fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
-
-  setFetchedChats(prev => ({
-    ...prev,
-    [selectedChat._id]: true,
-  }));
-}, [selectedChat?._id]);
-
-
+    if (selectedChat && !messagesByChat[selectedChat._id]) {
+      fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
+      if (authUser?._id) {
+        markAsRead({ chatId: selectedChat._id, userId: authUser._id });
+      }
+    }
+  }, [selectedChat, messagesByChat, fetchMessages, markAsRead, authUser]);
 
   const sortedChats = useMemo(() => {
     return [...chats].sort((a, b) => {
