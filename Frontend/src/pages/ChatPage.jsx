@@ -56,6 +56,7 @@ function ChatPage() {
   const [selectedUsers, setSelectedUsers] = useState([]);
 
   const [isEditingGroup, setIsEditingGroup] = useState(false);
+const [fetchedChats, setFetchedChats] = useState({});
 
   // mobile: true = show sidebar, false = show chat window
   const [showSidebarOnMobile, setShowSidebarOnMobile] = useState(true);
@@ -88,14 +89,19 @@ function ChatPage() {
   });
 }, [selectedChat?._id, authUser?._id, markAsRead]);
 
-
-  useEffect(() => {
+useEffect(() => {
   if (!selectedChat?._id) return;
 
-  if (!messagesByChat[selectedChat._id]) {
-    fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
-  }
-}, [selectedChat?._id, fetchMessages]);
+  if (fetchedChats[selectedChat._id]) return;
+
+  fetchMessages({ chatId: selectedChat._id, page: 1, limit: 50 });
+
+  setFetchedChats(prev => ({
+    ...prev,
+    [selectedChat._id]: true,
+  }));
+}, [selectedChat?._id]);
+
 
 
   const sortedChats = useMemo(() => {
