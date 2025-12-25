@@ -64,29 +64,29 @@ function ChatPage() {
     : null;
 
   const messages = activeMessagesEntry?.data || [];
+  const readOnceRef = useRef(new Set());
 
   useEffect(() => {
-    if (!selectedChat || !authUser?._id) return;
+  if (!selectedChat || !authUser?._id) return;
 
-    if (readIntervalRef.current) {
-      clearInterval(readIntervalRef.current);
-    }
+  const chatId = selectedChat._id;
 
-    readIntervalRef.current = setInterval(() => {
-      markAsRead({
-        chatId: selectedChat._id,
-        userId: authUser._id,
-        silent: true,
-      });
-    }, 10_000);
+  // fetch messages once
+  if (!messagesByChat[chatId]) {
+    fetchMessages({ chatId, page: 1, limit: 50 });
+  }
 
-    return () => {
-      if (readIntervalRef.current) {
-        clearInterval(readIntervalRef.current);
-        readIntervalRef.current = null;
-      }
-    };
-  }, [selectedChat, authUser, fetchMessages, markAsRead, messagesByChat]);
+  // ✅ MARK READ ONLY ONCE PER CHAT
+  if (!readOnceRef.current.has(chatId)) {
+    markAsRead({
+      chatId,
+      userId: authUser._id,
+      silent: true,
+    });
+
+    readOnceRef.current.add(chatId);
+  }
+}, [selectedChat, authUser, fetchMessages, markAsRead, messagesByChat]);
 
   /* ---------- sort chats ---------- */
   const sortedChats = useMemo(() => {
