@@ -179,32 +179,38 @@ markAsRead: async ({ chatId, userId, silent = false }) => {
   try {
     await axiosInstance.put("/api/message/read", { chatId });
 
-    // 🔥 OPTIMISTIC UPDATE
-    set((state) => {
-      const entry = state.messagesByChat[chatId];
-      if (!entry?.data) return {};
+   set((state) => {
+  const entry = state.messagesByChat[chatId];
+  if (!entry?.data) return {};
 
-      return {
-        messagesByChat: {
-          ...state.messagesByChat,
-          [chatId]: {
-            ...entry,
-            data: entry.data.map((msg) => {
-              if (
-                msg.sender === userId ||
-                msg.readBy?.includes(userId)
-              )
-                return msg;
+  return {
+    messagesByChat: {
+      ...state.messagesByChat,
+      [chatId]: {
+        ...entry,
+        data: entry.data.map((msg) => {
+          const normalizeId = (v) =>
+            typeof v === "string" ? v : v?._id?.toString();
 
-              return {
-                ...msg,
-                readBy: [...(msg.readBy || []), userId],
-              };
-            }),
-          },
-        },
-      };
-    });
+          const senderId = normalizeId(msg.sender);
+          const readByIds = (msg.readBy || []).map(normalizeId);
+
+          // don't mark sender's own message
+          if (senderId === userId) return msg;
+
+          // already read → do nothing
+          if (readByIds.includes(userId)) return msg;
+
+          return {
+            ...msg,
+            readBy: [...readByIds, userId], // ✅ ALWAYS STRINGS
+          };
+        }),
+      },
+    },
+  };
+});
+
 
     return { success: true };
   } catch {

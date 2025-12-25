@@ -170,8 +170,13 @@ function ChatMessages({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  const normalizeId = (val) =>
-    typeof val === "string" ? val : val?._id?.toString();
+  const normalizeId = (val) => {
+  if (!val) return null;
+  if (typeof val === "string") return val;
+  if (typeof val === "object" && val._id) return String(val._id);
+  return null;
+};
+
 
   const otherUser =
     !isGroupChat && selectedChat?.users
