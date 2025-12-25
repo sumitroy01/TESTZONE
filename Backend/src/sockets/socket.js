@@ -1,18 +1,11 @@
-// server/socket.js
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 
 const userSocketMap = new Map(); // userId -> Set(socketId)
+const activeChatMap = new Map(); // userId -> chatId
 let io = null;
 
-export function getReceiverSocketIds(userId) {
-  const s = userSocketMap.get(String(userId));
-  return s ? Array.from(s) : [];
-}
-
-export function getOnlineUsers() {
-  return Array.from(userSocketMap.keys());
-}
+/* ================= SOCKET MAP ================= */
 
 export function addUserSocket(userId, socketId) {
   if (!userId) return;
@@ -30,7 +23,37 @@ export function removeUserSocket(userId, socketId) {
   if (set.size === 0) userSocketMap.delete(uid);
 }
 
-export function initSocket(server, opts = {}) {
+export function getReceiverSocketIds(userId) {
+  const s = userSocketMap.get(String(userId));
+  return s ? Array.from(s) : [];
+}
+
+export function getOnlineUsers() {
+  return Array.from(userSocketMap.keys());
+}
+
+/* ================= ACTIVE CHAT ================= */
+
+export function setActiveChat(userId, chatId) {
+  if (!userId || !chatId) return;
+  activeChatMap.set(String(userId), String(chatId));
+}
+
+export function clearActiveChat(userId, chatId) {
+  if (!userId) return;
+  const uid = String(userId);
+  if (activeChatMap.get(uid) === String(chatId)) {
+    activeChatMap.delete(uid);
+  }
+}
+
+export function getActiveChat(userId) {
+  return activeChatMap.get(String(userId)) || null;
+}
+
+/* ================= SOCKET INIT ================= */
+
+export function initSocket(server) {
   if (io) return io;
 
   io = new Server(server, {
@@ -40,27 +63,27 @@ export function initSocket(server, opts = {}) {
     },
   });
 
-  // small auth example: JWT in handshake.auth.token
   io.use((socket, next) => {
     try {
       const token = socket.handshake.auth?.token;
-      if (!token) return next(); // allow anonymous; change to error to require auth
+      if (!token) return next();
       const payload = jwt.verify(token, process.env.JWT_SECRET);
       socket.data.userId = String(payload.id);
       socket.data.username = payload.username;
-      return next();
-    } catch (err) {
-      // allow anonymous if token missing/invalid (or call next(new Error('Auth error')))
-      return next();
+      next();
+    } catch {
+      next();
     }
   });
 
   return io;
 }
 
+/* ================= EMITTERS ================= */
+
 export function emitToUser(userId, event, payload) {
-  const ids = getReceiverSocketIds(String(userId));
   if (!io) return;
+  const ids = getReceiverSocketIds(String(userId));
   ids.forEach((sid) => io.to(sid).emit(event, payload));
 }
 

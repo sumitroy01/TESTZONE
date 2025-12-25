@@ -1,7 +1,8 @@
 // src/lib/socket-listeners.js
-import { getSocket } from "../socket.js"; // path to your socket helper
-import chatstore from "../store/chat.store"; // path to chatstore file
-import messageStore from "../store/message.store"; // path to message store
+
+import { getSocket } from "../socket.js";
+import chatstore from "../store/chat.store";
+import messageStore from "../store/message.store";
 
 let registered = false;
 
@@ -15,78 +16,78 @@ export function registerSocketListeners() {
     return;
   }
 
-  // incoming chat message (server emits "message")
+  /* ================= INCOMING MESSAGE ================= */
+
   socket.on("message", (msg) => {
     try {
-      // msg should include chat id in msg.chat or msg.chat._id depending on server payload
-      const chatId = (msg.chat && (msg.chat._id || msg.chat)) || msg.chatId || msg.chat;
+      const chatId =
+        msg?.chat?._id ||
+        msg?.chat ||
+        msg?.chatId;
+
       if (!chatId) {
-        console.warn("socket message missing chat id", msg);
+        console.warn("socket message missing chatId", msg);
         return;
       }
-      // push into message store
-      messageStore.getState().addIncomingMessage(String(chatId), msg);
 
-      // if chat list needs to update latest message preview, update chatstore
+      messageStore
+        .getState()
+        .addIncomingMessage(String(chatId), msg);
+
+      // update latest message in chat list
       const chats = chatstore.getState().chats || [];
-      const chatExists = chats.some((c) => String(c._id) === String(chatId));
-      if (chatExists) {
-        // update latestMessage on that chat
-        const updatedChats = chats.map((c) =>
-          String(c._id) === String(chatId) ? { ...c, latestMessage: msg } : c
-        );
-        chatstore.setState({ chats: updatedChats });
-      } else {
-        // optional: fetch chats or prepend new chat if server emits a newChat event
+      const exists = chats.some((c) => String(c._id) === String(chatId));
+
+      if (exists) {
+        chatstore.setState({
+          chats: chats.map((c) =>
+            String(c._id) === String(chatId)
+              ? { ...c, latestMessage: msg }
+              : c
+          ),
+        });
       }
     } catch (err) {
       console.error("socket message handler error", err);
     }
   });
 
-  // message deleted
-  socket.on("message_deleted", (payload) => {
-    try {
-      const { messageId, chatId } = payload || {};
-      if (chatId && messageId) {
-        messageStore.getState().deleteMessage({ messageId, chatId });
-      }
-    } catch (err) {
-      console.error("socket message_deleted handler", err);
-    }
+  /* ================= MESSAGE DELETED ================= */
+
+  socket.on("message_deleted", ({ messageId, chatId }) => {
+    if (!messageId || !chatId) return;
+    messageStore
+      .getState()
+      .deleteMessage({ messageId, chatId });
   });
 
-  // messages_read
-  socket.on("messages_read", (payload) => {
-    try {
-      const { chatId, by, messageId } = payload || {};
-      if (!chatId) return;
-      // local optimistic update: add 'by' to readBy for appropriate messages
-      messageStore.getState().markAsRead({ chatId, messageId, userId: by, silent: true });
-    } catch (err) {
-      console.error("socket messages_read handler", err);
-    }
+  /* ================= READ RECEIPTS ================= */
+
+  socket.on("messages_read", ({ chatId, by, messageId }) => {
+    if (!chatId || !by) return;
+
+    messageStore.getState().markAsRead({
+      chatId,
+      messageId,
+      userId: by,
+      silent: true, // 👈 important: no side-effects
+    });
   });
 
-  // online users update (if you use it)
-  socket.on("getOnlineUsers", (usersArray) => {
-    // optionally save to some presence store or UI
-    console.debug("online users:", usersArray);
+  /* ================= PRESENCE (OPTIONAL) ================= */
+
+  socket.on("getOnlineUsers", (users) => {
+    console.debug("online users:", users);
   });
 
-  // if server emits 'newChat' for chats created for the user, handle it
+  /* ================= NEW CHAT ================= */
+
   socket.on("newChat", (chat) => {
-    try {
-      if (!chat) return;
-      const normalized = chatstore.getState().setSelectedChat ? chatstore.getState().setSelectedChat : null;
-      // simpler: just prepend to chat list
-      const chats = chatstore.getState().chats || [];
-      const exists = chats.some((c) => String(c._id) === String(chat._id));
-      if (!exists) {
-        chatstore.setState({ chats: [chat, ...chats] });
-      }
-    } catch (err) {
-      console.error("socket newChat handler", err);
+    if (!chat) return;
+    const chats = chatstore.getState().chats || [];
+    const exists = chats.some((c) => String(c._id) === String(chat._id));
+    if (!exists) {
+      chatstore.setState({ chats: [chat, ...chats] });
     }
   });
 }

@@ -149,9 +149,15 @@ export const markMessagesRead = async (req, res) => {
 
     const filter = messageId ? { _id: messageId } : { chat: chatId };
 
-    await Messages.updateMany(filter, {
-      $addToSet: { readBy: userId },
-    });
+    await Messages.updateMany(
+      {
+        ...filter,
+        readBy: { $ne: userId }, //
+      },
+      {
+        $addToSet: { readBy: userId },
+      }
+    );
 
     return res.status(200).json({ message: "Marked as read" });
   } catch (err) {
@@ -186,7 +192,10 @@ export const deleteMessage = async (req, res) => {
 
     // optionally inform sockets about deletion
     try {
-      emitToRoom(String(message.chat), "message_deleted", { messageId, chatId: message.chat });
+      emitToRoom(String(message.chat), "message_deleted", {
+        messageId,
+        chatId: message.chat,
+      });
     } catch (e) {
       console.warn("emit message_deleted failed:", e?.message || e);
     }
