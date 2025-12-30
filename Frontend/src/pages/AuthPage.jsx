@@ -1,4 +1,3 @@
-// src/pages/AuthPage.jsx
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import authStore from "../store/auth.store.js";
@@ -17,25 +16,24 @@ function AuthPage({ initialMode = "login", onBackToLanding }) {
     resetPass,
     verifyUser,
     resendOtp,
+    resendResetOtp,
     isSigningUp,
     isLogginIn,
     isResettingPass,
     verficationPendingId,
   } = authStore();
 
-  // main mode state
   const [mode, setMode] = useState(
     verficationPendingId ? "verify" : initialMode
   );
 
-  // keep mode in sync with initialMode when NOT verifying
+  const [resetEmail, setResetEmail] = useState("");
+
   useEffect(() => {
     if (!verficationPendingId) {
       setMode(initialMode);
     }
   }, [initialMode, verficationPendingId]);
-
-  const [resetEmail, setResetEmail] = useState("");
 
   const showBack = typeof onBackToLanding === "function";
 
@@ -46,7 +44,7 @@ function AuthPage({ initialMode = "login", onBackToLanding }) {
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
       >
-        {/* -------- Header & tabs -------- */}
+        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-sm font-semibold">
@@ -62,13 +60,13 @@ function AuthPage({ initialMode = "login", onBackToLanding }) {
             </p>
             <p className="text-[11px] text-neutral-400">
               {mode === "login"
-                ? "Log in to continue your conversations."
+                ? "Log in to continue."
                 : mode === "signup"
-                ? "Set up your profile and start chatting."
+                ? "Create your account."
                 : mode === "forgot"
-                ? "Enter your email to receive a reset OTP."
+                ? "Enter your email to receive OTP."
                 : mode === "reset"
-                ? "Use the OTP sent to your email."
+                ? "Enter OTP and new password."
                 : "Enter the OTP sent to your email."}
             </p>
           </div>
@@ -94,7 +92,6 @@ function AuthPage({ initialMode = "login", onBackToLanding }) {
           </div>
         </div>
 
-        {/* -------- Forms with animation -------- */}
         <AnimatePresence mode="wait">
           {mode === "login" && (
             <LoginForm
@@ -139,6 +136,7 @@ function AuthPage({ initialMode = "login", onBackToLanding }) {
               key="reset"
               resetPass={resetPass}
               isResettingPass={isResettingPass}
+              resendOtppass={resendResetOtp}
               initialEmail={resetEmail}
               onSuccess={() => {
                 setResetEmail("");

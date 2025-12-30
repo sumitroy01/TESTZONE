@@ -1,46 +1,86 @@
-// src/pages/LoggedOutHome.jsx
 import { motion } from "framer-motion";
 
 function LoggedOutHome({ onShowLogin, onShowSignup }) {
   return (
-    <div className="flex flex-col lg:flex-row items-center gap-10 mt-8">
-      <motion.div
-        className="flex-1 space-y-4"
-        initial={{ opacity: 0, x: -12 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.25 }}
-      >
-        <p className="text-[11px] uppercase tracking-[0.35em] text-sky-400">
-          Realtime messaging
-        </p>
-        <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">
-          A clean chat surface for serious conversations.
-        </h1>
-        <p className="text-sm text-neutral-300 max-w-md">
-          No neon green bubbles, no clutter. Just fast conversations with a
-          focused interface that feels like a modern web app, not a phone clone.
-        </p>
-        <div className="flex gap-3 pt-3">
-          <button
-            className="px-4 py-2 rounded-xl bg-white text-slate-950 text-sm font-medium hover:bg-neutral-100 transition"
-            onClick={onShowSignup}
-          >
-            Get started
-          </button>
-          <button
-            className="px-4 py-2 rounded-xl border border-white/20 text-sm hover:bg-white/5 transition"
-            onClick={onShowLogin}
-          >
-            Login
-          </button>
-        </div>
-        <p className="text-[11px] text-neutral-500 pt-1">
-          Tip: create focused groups for projects, clients, or teams.
-        </p>
-      </motion.div>
+    <div className="min-h-[80vh] flex items-center justify-center px-6">
+      <div className="grid lg:grid-cols-2 gap-12 items-center max-w-6xl w-full">
 
-      {/* right preview stays same */}
-      {/* ... */}
+        {/* LEFT SIDE — TEXT */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="space-y-6"
+        >
+          <p className="uppercase tracking-[0.4em] text-sky-400 text-xs">
+            Messaging, but better
+          </p>
+
+          <h1 className="text-4xl sm:text-5xl font-semibold leading-tight">
+            Conversations that <br />
+            <span className="text-sky-400">actually feel alive.</span>
+          </h1>
+
+          <p className="text-neutral-400 max-w-md">
+            No noise. No clutter. Just smooth, real-time conversations that flow
+            naturally — like talking in real life.
+          </p>
+
+          <div className="flex gap-4 pt-4">
+            <button
+              onClick={onShowSignup}
+              className="px-5 py-2.5 rounded-xl bg-sky-500 text-white font-medium hover:bg-sky-400 transition"
+            >
+              Start chatting
+            </button>
+
+            <button
+              onClick={onShowLogin}
+              className="px-5 py-2.5 rounded-xl border border-white/20 text-white hover:bg-white/5 transition"
+            >
+              Login
+            </button>
+          </div>
+        </motion.div>
+
+        {/* RIGHT SIDE — FUN ANIMATION */}
+        <div className="relative h-[320px] w-full">
+
+          {/* Floating bubbles */}
+          {[
+            { text: "Hey 👋", x: 20, y: 40, delay: 0 },
+            { text: "You there?", x: 180, y: 90, delay: 0.6 },
+            { text: "Let’s build 🚀", x: 80, y: 180, delay: 1.2 },
+             { text: "26 me duniya khatm hai  💣",x: 180, y: 90, delay:3},
+          ].map((msg, i) => (
+            <motion.div
+              key={i}
+              className="absolute bg-neutral-800 text-white px-4 py-2 rounded-2xl text-sm shadow-md"
+              initial={{ opacity: 0, scale: 0.8, y: 20 }}
+              animate={{
+                opacity: [0, 1, 1, 0],
+                y: [20, 0, 0, -20],
+              }}
+              transition={{
+                duration: 3,
+                delay: msg.delay,
+                repeat: Infinity,
+                repeatDelay: 1.5,
+              }}
+              style={{ left: msg.x, top: msg.y }}
+            >
+              {msg.text}
+            </motion.div>
+          ))}
+
+          {/* Floating glow */}
+          <motion.div
+            className="absolute inset-0 rounded-full blur-3xl bg-sky-500/20"
+            animate={{ opacity: [0.2, 0.4, 0.2] }}
+            transition={{ duration: 4, repeat: Infinity }}
+          />
+        </div>
+      </div>
     </div>
   );
 }

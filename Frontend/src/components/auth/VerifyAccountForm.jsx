@@ -23,6 +23,7 @@ function VerifyAccountForm({
 
   const handleResend = async () => {
     await resendOtp();
+    
   };
 
   return (
@@ -38,6 +39,9 @@ function VerifyAccountForm({
         <label className="text-[11px] text-neutral-400">
           Enter OTP sent to your email
         </label>
+         <span className="block text-[15px] text-neutral-500 mt-1">
+    Didn’t receive it? Check your Spam or Promotions folder.
+  </span>
         <input
           className="mt-1 w-full bg-white/5 rounded-xl px-3 py-2 outline-none focus:ring-1 focus:ring-sky-500/60"
           value={otpValue}
